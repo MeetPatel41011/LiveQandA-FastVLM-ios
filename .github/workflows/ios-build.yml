@@ -79,8 +79,18 @@ jobs:
         if: steps.cache-weights.outputs.cache-hit != 'true'
         run: |
           chmod +x ./get_pretrained_mlx_model.sh
-          # The script prompts y/N if the dest is non-empty; pipe `y`.
-          yes | ./get_pretrained_mlx_model.sh --model 1.5b --dest ./FastVLM/model
+          # If a previous failed run left a partial cache on disk, nuke
+          # it so the script doesn't trigger its interactive `read -p`
+          # prompt. Belt: directory clean. Suspenders: pipe a single
+          # 'y' anyway.
+          rm -rf ./FastVLM/model
+          mkdir -p ./FastVLM/model
+          # NOTE: do NOT use `yes |` here. GitHub Actions runs bash with
+          # `-o pipefail`, and `yes` always exits 141 (SIGPIPE) when the
+          # downstream process closes its stdin -- which fails the step
+          # even though wget/unzip succeeded. `echo "y"` writes a single
+          # line and exits cleanly before the pipe breaks.
+          echo "y" | ./get_pretrained_mlx_model.sh --model 1.5b --dest ./FastVLM/model
 
       - name: Sanity-check weights
         run: |
