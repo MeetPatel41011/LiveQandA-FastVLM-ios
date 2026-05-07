@@ -1,0 +1,8 @@
+source "https://rubygems.org"
+
+# Pin fastlane to a known-good 2.x. Newer minor versions are usually safe;
+# a major bump may break the syntax in fastlane/Fastfile so we cap below 3.
+gem "fastlane", "~> 2.220"
+
+# fastlane uses xcodeproj to read the .xcodeproj at build time
+gem "xcodeproj", "~> 1.25"

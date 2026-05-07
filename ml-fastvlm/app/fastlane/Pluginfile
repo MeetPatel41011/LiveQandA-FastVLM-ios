@@ -1,0 +1,3 @@
+# No plugins required — every action used in Fastfile is built into
+# fastlane core. This file exists so `fastlane install_plugins` is a
+# no-op rather than an error.

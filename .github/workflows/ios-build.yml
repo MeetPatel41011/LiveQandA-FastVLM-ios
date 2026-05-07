@@ -1,0 +1,149 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "fastlane lane to run (beta = upload, build_only = just build)"
+        required: false
+        default: "beta"
+        type: choice
+        options:
+          - beta
+          - build_only
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Upload to TestFlight
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ml-fastvlm/app
+        shell: bash
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+      FASTLANE_DISABLE_COLORS: 1
+      FASTLANE_SKIP_UPDATE_CHECK: 1
+      FASTLANE_HIDE_CHANGELOG: 1
+      FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Pin the Xcode version explicitly. macos-14 ships with several
+      # versions; we pick the highest that supports the iOS 18.2 SDK.
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          ruby --version
+
+      # ------------------------------------------------------------------
+      # Cache 1: SwiftPM packages (MLX, MLXVLM, Transformers, ...).
+      # The DerivedData/SourcePackages directory holds resolved git deps.
+      # ------------------------------------------------------------------
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('ml-fastvlm/app/FastVLM.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'ml-fastvlm/app/FastVLM.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      # ------------------------------------------------------------------
+      # Cache 2: the ~2 GB MLX model weights. Keyed on the script's
+      # SHA so the cache invalidates only when Apple updates the URL.
+      # ------------------------------------------------------------------
+      - name: Cache FastVLM 1.5B INT8 weights
+        id: cache-weights
+        uses: actions/cache@v4
+        with:
+          path: ml-fastvlm/app/FastVLM/model
+          key: fastvlm-1.5b-int8-${{ hashFiles('ml-fastvlm/app/get_pretrained_mlx_model.sh') }}
+
+      - name: Download FastVLM 1.5B INT8 weights
+        if: steps.cache-weights.outputs.cache-hit != 'true'
+        run: |
+          chmod +x ./get_pretrained_mlx_model.sh
+          # The script prompts y/N if the dest is non-empty; pipe `y`.
+          yes | ./get_pretrained_mlx_model.sh --model 1.5b --dest ./FastVLM/model
+
+      - name: Sanity-check weights
+        run: |
+          if [ ! -d ./FastVLM/model ] || [ -z "$(ls -A ./FastVLM/model 2>/dev/null)" ]; then
+            echo "::error::FastVLM/model is empty after download"
+            exit 1
+          fi
+          du -sh ./FastVLM/model
+
+      # ------------------------------------------------------------------
+      # Cache 3: Bundler (fastlane gems).
+      # ------------------------------------------------------------------
+      - name: Set up Ruby + Bundler
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: ml-fastvlm/app
+
+      - name: Print fastlane version
+        run: bundle exec fastlane --version
+
+      # ------------------------------------------------------------------
+      # Run the lane.
+      # ------------------------------------------------------------------
+      - name: Run fastlane (${{ github.event.inputs.lane || 'beta' }})
+        env:
+          # Apple credentials (see IOS_DEPLOYMENT_RUNBOOK.md Phase 0d).
+          APPLE_TEAM_ID:                 ${{ secrets.APPLE_TEAM_ID }}
+          APP_BUNDLE_IDENTIFIER:         ${{ secrets.APP_BUNDLE_IDENTIFIER }}
+          APP_STORE_CONNECT_KEY_ID:      ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID:   ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY:         ${{ secrets.APP_STORE_CONNECT_KEY }}
+          # match (signing certs).
+          MATCH_PASSWORD:                ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL:                 ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          # Optional Tavily key (web search). Empty is fine; Wikipedia
+          # fallback still works without it.
+          TAVILY_API_KEY:                ${{ secrets.TAVILY_API_KEY }}
+        run: |
+          bundle exec fastlane ${{ github.event.inputs.lane || 'beta' }}
+
+      # ------------------------------------------------------------------
+      # Always upload the build artifact + logs so failed runs are easy
+      # to debug from a Windows machine.
+      # ------------------------------------------------------------------
+      - name: Upload .ipa
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Iris-ipa-${{ github.run_number }}
+          path: ml-fastvlm/app/build/Iris.ipa
+          retention-days: 14
+
+      - name: Upload fastlane logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastlane-logs-${{ github.run_number }}
+          path: |
+            ~/Library/Logs/fastlane
+            ~/Library/Logs/gym
+            ml-fastvlm/app/fastlane/report.xml
+          retention-days: 7
+          if-no-files-found: ignore

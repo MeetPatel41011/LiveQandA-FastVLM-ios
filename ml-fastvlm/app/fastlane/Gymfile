@@ -1,0 +1,12 @@
+# Defaults for `fastlane gym` (the build step). Anything overridden in
+# the Fastfile takes precedence.
+
+scheme("FastVLM App")
+workspace_or_project("FastVLM.xcodeproj")
+configuration("Release")
+clean(true)
+output_directory("./build")
+output_name("Iris.ipa")
+export_method("app-store")
+include_bitcode(false)
+include_symbols(true)

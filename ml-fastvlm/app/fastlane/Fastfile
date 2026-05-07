@@ -1,0 +1,102 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build and upload to TestFlight (Internal Testing)"
+  lane :beta do
+    setup_ci
+
+    # Pull the App Store distribution cert + profile from the encrypted
+    # cert repo (created in Phase 0d). Read-only; never mutates the repo.
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_KEY"],
+      duration: 1200,
+      in_house: false
+    )
+
+    match(
+      type: "appstore",
+      readonly: true,
+      api_key: api_key
+    )
+
+    # Auto-bump the build number based on the highest TestFlight build.
+    # This makes pushes idempotent: same source -> same version, but the
+    # build number always increments so TestFlight accepts the upload.
+    bn = latest_testflight_build_number(
+      app_identifier: ENV["APP_BUNDLE_IDENTIFIER"],
+      api_key: api_key
+    )
+    increment_build_number(
+      build_number: (bn || 0) + 1,
+      xcodeproj: "FastVLM.xcodeproj"
+    )
+
+    # Override the bundle ID and team. The pbxproj ships with
+    # com.apple.ml.FastVLM (Apple's namespace, can't be re-signed by us).
+    xcargs = [
+      "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
+      "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}",
+      # Inject mic + speech permissions via INFOPLIST_KEY_*.
+      "INFOPLIST_KEY_NSMicrophoneUsageDescription=\"Iris listens to your spoken question.\"",
+      "INFOPLIST_KEY_NSSpeechRecognitionUsageDescription=\"Iris transcribes your spoken question on-device.\"",
+      # Bake the Tavily key into Info.plist if provided. Tools.swift reads
+      # this at runtime via Bundle.main.object(forInfoDictionaryKey:).
+      "INFOPLIST_KEY_TavilyAPIKey=\"#{ENV['TAVILY_API_KEY']}\""
+    ].join(" ")
+
+    build_app(
+      project: "FastVLM.xcodeproj",
+      scheme: "FastVLM App",
+      configuration: "Release",
+      export_method: "app-store",
+      xcargs: xcargs,
+      output_directory: "./build",
+      output_name: "Iris.ipa",
+      clean: true,
+      include_symbols: true,
+      include_bitcode: false
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: "./build/Iris.ipa",
+      skip_waiting_for_build_processing: true,
+      changelog: "Automated build from #{ENV['GITHUB_SHA'] || 'local'} on #{Time.now.utc.strftime('%Y-%m-%d %H:%M UTC')}",
+      distribute_external: false
+    )
+  end
+
+  desc "Build the app without uploading. Useful for PR sanity checks."
+  lane :build_only do
+    setup_ci
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_KEY"],
+      duration: 1200,
+      in_house: false
+    )
+    match(type: "appstore", readonly: true, api_key: api_key)
+
+    xcargs = [
+      "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
+      "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}",
+      "INFOPLIST_KEY_NSMicrophoneUsageDescription=\"Iris listens to your spoken question.\"",
+      "INFOPLIST_KEY_NSSpeechRecognitionUsageDescription=\"Iris transcribes your spoken question on-device.\"",
+      "INFOPLIST_KEY_TavilyAPIKey=\"#{ENV['TAVILY_API_KEY']}\""
+    ].join(" ")
+
+    build_app(
+      project: "FastVLM.xcodeproj",
+      scheme: "FastVLM App",
+      configuration: "Release",
+      export_method: "app-store",
+      xcargs: xcargs,
+      output_directory: "./build",
+      output_name: "Iris.ipa",
+      clean: true
+    )
+  end
+end

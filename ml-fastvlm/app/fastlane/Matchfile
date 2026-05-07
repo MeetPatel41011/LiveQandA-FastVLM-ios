@@ -1,0 +1,19 @@
+# fastlane match stores signing certificates + provisioning profiles in
+# an encrypted git repo. See IOS_DEPLOYMENT_RUNBOOK.md Phase 0d step 3.
+
+git_url(ENV["MATCH_GIT_URL"] || "https://github.com/REPLACE_ME/iris-certs.git")
+
+# https mode + basic auth via MATCH_GIT_BASIC_AUTHORIZATION (a base64
+# encoded "user:personal_access_token") is the right mode for GH Actions.
+git_basic_authorization(ENV["MATCH_GIT_BASIC_AUTHORIZATION"])
+
+storage_mode("git")
+
+# We only need an App Store distribution profile for TestFlight builds.
+type("appstore")
+
+app_identifier([ENV["APP_BUNDLE_IDENTIFIER"] || "com.example.iris"])
+username(ENV["APPLE_ID"] || "you@example.com")
+
+# CI runs are non-interactive.
+readonly(true)
