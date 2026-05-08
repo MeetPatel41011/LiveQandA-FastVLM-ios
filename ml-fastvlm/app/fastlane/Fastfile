@@ -1,6 +1,10 @@
 default_platform(:ios)
 
 platform :ios do
+  def match_readonly_mode
+    ENV.fetch("MATCH_READONLY", "true") == "true"
+  end
+
   desc "Build and upload to TestFlight (Internal Testing)"
   lane :beta do
     setup_ci
@@ -17,7 +21,7 @@ platform :ios do
 
     match(
       type: "appstore",
-      readonly: true,
+      readonly: match_readonly_mode,
       api_key: api_key
     )
 
@@ -78,7 +82,7 @@ platform :ios do
       duration: 1200,
       in_house: false
     )
-    match(type: "appstore", readonly: true, api_key: api_key)
+    match(type: "appstore", readonly: match_readonly_mode, api_key: api_key)
 
     xcargs = [
       "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
