@@ -2,7 +2,9 @@ default_platform(:ios)
 
 platform :ios do
   def match_readonly_mode
-    ENV.fetch("MATCH_READONLY", "true") == "true"
+    # setup_ci sets MATCH_READONLY=true automatically in CI. Use a custom
+    # env key so we can intentionally allow a one-time writable bootstrap.
+    ENV.fetch("IRIS_MATCH_READONLY", "true") == "true"
   end
 
   desc "Build and upload to TestFlight (Internal Testing)"
