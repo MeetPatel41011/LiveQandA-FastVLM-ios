@@ -27,6 +27,15 @@ platform :ios do
       api_key: api_key
     )
 
+    # Disable automatic signing for CI. We target the original bundle ID 
+    # (com.apple.ml.FastVLM) to ensure only the app target is switched 
+    # to Manual signing, avoiding side-effects on SPM targets.
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "FastVLM.xcodeproj",
+      bundle_identifier: "com.apple.ml.FastVLM"
+    )
+
     # Auto-bump the build number based on the highest TestFlight build.
     # This makes pushes idempotent: same source -> same version, but the
     # build number always increments so TestFlight accepts the upload.
@@ -88,6 +97,12 @@ platform :ios do
       in_house: false
     )
     match(type: "appstore", readonly: match_readonly_mode, api_key: api_key)
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "FastVLM.xcodeproj",
+      bundle_identifier: "com.apple.ml.FastVLM"
+    )
 
     xcargs = [
       "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
