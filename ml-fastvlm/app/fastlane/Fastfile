@@ -27,17 +27,15 @@ platform :ios do
       api_key: api_key
     )
 
-    # Disable automatic signing for the main app target.
-    # We target by name ("FastVLM App") to avoid touching SPM targets.
+    # Disable automatic signing for ALL targets in the project.
+    # This prevents dependencies (like 'Video' or 'FastVLM') from 
+    # trying to use Automatic signing which fails in CI.
     update_code_signing_settings(
       use_automatic_signing: false,
-      path: "FastVLM.xcodeproj",
-      targets: ["FastVLM App"]
+      path: "FastVLM.xcodeproj"
     )
 
     # Auto-bump the build number based on the highest TestFlight build.
-    # This makes pushes idempotent: same source -> same version, but the
-    # build number always increments so TestFlight accepts the upload.
     bn = latest_testflight_build_number(
       app_identifier: ENV["APP_BUNDLE_IDENTIFIER"],
       api_key: api_key
@@ -48,16 +46,15 @@ platform :ios do
     )
 
     # Override the bundle ID and team. 
-    # Also explicitly provide the Provisioning Profile Name from match.
+    # We must be EXPLICIT about the Identity and Profile in CI.
     profile_name = ENV["sigh_#{ENV['APP_BUNDLE_IDENTIFIER']}_appstore_profile-name"]
     xcargs = [
       "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
       "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}",
+      "CODE_SIGN_IDENTITY=\"Apple Distribution\"",
       "PROVISIONING_PROFILE_SPECIFIER=\"#{profile_name}\"",
-      # Inject mic + speech permissions via INFOPLIST_KEY_*.
       "INFOPLIST_KEY_NSMicrophoneUsageDescription=\"Iris listens to your spoken question.\"",
       "INFOPLIST_KEY_NSSpeechRecognitionUsageDescription=\"Iris transcribes your spoken question on-device.\"",
-      # Bake the Tavily key into Info.plist if provided.
       "INFOPLIST_KEY_TavilyAPIKey=\"#{ENV['TAVILY_API_KEY']}\""
     ].join(" ")
 
@@ -96,16 +93,17 @@ platform :ios do
     )
     match(type: "appstore", readonly: match_readonly_mode, api_key: api_key)
 
+    # Disable automatic signing for ALL targets.
     update_code_signing_settings(
       use_automatic_signing: false,
-      path: "FastVLM.xcodeproj",
-      targets: ["FastVLM App"]
+      path: "FastVLM.xcodeproj"
     )
 
     profile_name = ENV["sigh_#{ENV['APP_BUNDLE_IDENTIFIER']}_appstore_profile-name"]
     xcargs = [
       "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
       "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}",
+      "CODE_SIGN_IDENTITY=\"Apple Distribution\"",
       "PROVISIONING_PROFILE_SPECIFIER=\"#{profile_name}\"",
       # Do not force provisioning profile specifier globally; that leaks into
       # Swift package targets which are not signable.
