@@ -12,6 +12,8 @@ storage_mode("git")
 # We only need an App Store distribution profile for TestFlight builds.
 type("appstore")
 
+git_branch("main")
+
 app_identifier([ENV["APP_BUNDLE_IDENTIFIER"] || "com.example.iris"])
 username(ENV["APPLE_ID"] || "you@example.com")
 
