@@ -44,9 +44,8 @@ platform :ios do
     xcargs = [
       "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
       "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}",
-      "CODE_SIGN_STYLE=Manual",
-      "CODE_SIGN_IDENTITY=\"Apple Distribution\"",
-      "PROVISIONING_PROFILE_SPECIFIER=\"match AppStore #{ENV['APP_BUNDLE_IDENTIFIER']}\"",
+      # Do not force provisioning profile specifier globally; that leaks into
+      # Swift package targets which are not signable.
       # Inject mic + speech permissions via INFOPLIST_KEY_*.
       "INFOPLIST_KEY_NSMicrophoneUsageDescription=\"Iris listens to your spoken question.\"",
       "INFOPLIST_KEY_NSSpeechRecognitionUsageDescription=\"Iris transcribes your spoken question on-device.\"",
@@ -93,9 +92,8 @@ platform :ios do
     xcargs = [
       "PRODUCT_BUNDLE_IDENTIFIER=#{ENV['APP_BUNDLE_IDENTIFIER']}",
       "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}",
-      "CODE_SIGN_STYLE=Manual",
-      "CODE_SIGN_IDENTITY=\"Apple Distribution\"",
-      "PROVISIONING_PROFILE_SPECIFIER=\"match AppStore #{ENV['APP_BUNDLE_IDENTIFIER']}\"",
+      # Do not force provisioning profile specifier globally; that leaks into
+      # Swift package targets which are not signable.
       "INFOPLIST_KEY_NSMicrophoneUsageDescription=\"Iris listens to your spoken question.\"",
       "INFOPLIST_KEY_NSSpeechRecognitionUsageDescription=\"Iris transcribes your spoken question on-device.\"",
       "INFOPLIST_KEY_TavilyAPIKey=\"#{ENV['TAVILY_API_KEY']}\""
