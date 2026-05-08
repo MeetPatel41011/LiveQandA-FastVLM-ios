@@ -106,36 +106,43 @@ class EdgeAgent:
         conv = conversation_lib.conv_templates["qwen_2"].copy()
 
         rule_instruction = (
-            "Analyze the image and extract the question written in it.\n"
-            "You MUST output a valid JSON object with exactly two fields.\n"
-            "Format: {\"text_in_image\": \"<question text>\", \"answer\": \"<factual answer>\"}\n\n"
+            "You are a high-precision OCR and fact-checking agent.\n"
+            "Examine the image and extract the EXACT question text written in it.\n"
+            "You MUST return ONLY a JSON object with these two fields.\n"
+            "{\n"
+            "  \"text_in_image\": \"the literal question\",\n"
+            "  \"answer\": \"your factual response\"\n"
+            "}\n"
         )
 
-        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + prompt
+        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "What is the question and answer for this image?"
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
-        formatted_prompt = conv.get_prompt() + '{"text_in_image": "'
+        # Prefixing the assistant response to force JSON structure
+        formatted_prompt = conv.get_prompt() + '{\n  "text_in_image": "'
 
         input_ids = tokenizer_image_token(
             formatted_prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
-        ).unsqueeze(0)
+        ).unsqueeze(0).to(self.device)
 
         pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         image_tensor = process_images([pil_img], self.image_processor, self.model.config)[0]
+        # Explicitly cast to half (float16) for GPU inference
+        image_tensor = image_tensor.to(self.device, dtype=self.dtype)
 
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
         generation_kwargs = dict(
             inputs=input_ids,
-            images=image_tensor.unsqueeze(0).float(),
+            images=image_tensor.unsqueeze(0),
             image_sizes=[pil_img.size],
             streamer=streamer,
-            max_new_tokens=100,
+            max_new_tokens=128,
             do_sample=False,
             use_cache=True,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
-            repetition_penalty=1.2
+            repetition_penalty=1.1
         )
 
         thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
@@ -150,9 +157,15 @@ class EdgeAgent:
                 break
 
         generated_text = generated_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
-        full_json_str = '{"text_in_image": "' + generated_text
-        if not full_json_str.endswith('}'):
-            full_json_str += '"}'
+        
+        # Heuristic to rebuild valid JSON from the pre-filled prefix
+        full_json_str = '{\n  "text_in_image": "' + generated_text
+        if not full_json_str.strip().endswith('}'):
+            # Close quotes and braces if missing
+            if '"' in generated_text and 'answer' not in generated_text:
+                 # It likely failed to emit the second field, try to add it
+                 full_json_str += '",\n  "answer": "Scanning failed."'
+            full_json_str += '\n}'
 
         text_in_image = ""
         llm_answer = ""
