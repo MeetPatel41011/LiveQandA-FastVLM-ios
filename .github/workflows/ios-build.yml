@@ -120,7 +120,6 @@ jobs:
         env:
           # Apple credentials (see IOS_DEPLOYMENT_RUNBOOK.md Phase 0d).
           APPLE_ID:                      ${{ secrets.APPLE_ID }}
-          APPLE_ID:                      ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID:                 ${{ secrets.APPLE_TEAM_ID }}
           APP_BUNDLE_IDENTIFIER:         ${{ secrets.APP_BUNDLE_IDENTIFIER }}
           APP_STORE_CONNECT_KEY_ID:      ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
