@@ -130,7 +130,7 @@ jobs:
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           # One-time bootstrap: allow match to create cert/profile when cert
           # repo is empty. Set to "true" after first successful signing run.
-          IRIS_MATCH_READONLY:           "false"
+          IRIS_MATCH_READONLY:           "true"
           # Optional Tavily key (web search). Empty is fine; Wikipedia
           # fallback still works without it.
           TAVILY_API_KEY:                ${{ secrets.TAVILY_API_KEY }}
