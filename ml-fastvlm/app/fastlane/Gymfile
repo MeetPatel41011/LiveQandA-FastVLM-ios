@@ -2,7 +2,7 @@
 # the Fastfile takes precedence.
 
 scheme("FastVLM App")
-workspace_or_project("FastVLM.xcodeproj")
+project("FastVLM.xcodeproj")
 configuration("Release")
 clean(true)
 output_directory("./build")
