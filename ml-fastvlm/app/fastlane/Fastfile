@@ -32,7 +32,7 @@ platform :ios do
     update_code_signing_settings(
       use_automatic_signing: false,
       path: "FastVLM.xcodeproj",
-      target: "FastVLM App"
+      targets: ["FastVLM App"]
     )
 
     # Auto-bump the build number based on the highest TestFlight build.
@@ -99,7 +99,7 @@ platform :ios do
     update_code_signing_settings(
       use_automatic_signing: false,
       path: "FastVLM.xcodeproj",
-      target: "FastVLM App"
+      targets: ["FastVLM App"]
     )
 
     profile_name = ENV["sigh_#{ENV['APP_BUNDLE_IDENTIFIER']}_appstore_profile-name"]
