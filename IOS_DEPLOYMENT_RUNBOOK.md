@@ -80,16 +80,20 @@ Already done in-repo. See:
 - [`ml-fastvlm/app/fastlane/Matchfile`](ml-fastvlm/app/fastlane/Matchfile)
   — points at the private cert repo you'll create in Phase 0d.
 - [`ml-fastvlm/app/fastlane/Appfile`](ml-fastvlm/app/fastlane/Appfile)
-  — placeholders you fill in below.
+  — reads bundle ID, Apple ID, and team ID from **environment variables**
+  (set in GitHub Actions from **Secrets**). Do **not** paste real values
+  into this file in the repo.
 
-**You must edit two values in `Appfile` and `Matchfile`:**
+**Do not edit `Appfile` or `Matchfile` in git.** They use `ENV["..."]`
+with safe placeholders as fallbacks (`com.example.iris`, `you@example.com`).
+CI injects the real values from the **Secrets** table in Phase 0d below.
 
-| File | Variable | What to put |
-| --- | --- | --- |
-| `Appfile` | `app_identifier` | Your bundle ID, e.g. `com.meetpatel.iris`. **Cannot start with `com.apple.*`.** |
-| `Appfile` | `apple_id` | Your Apple ID email |
-| `Appfile` | `team_id` | Your Apple Developer team ID (10-char string at <https://developer.apple.com/account> → Membership) |
-| `Matchfile` | `git_url` | The HTTPS URL of the private cert repo from Phase 0d step 3 |
+| Value | Where it comes from in CI |
+| --- | --- |
+| Bundle ID | Secret `APP_BUNDLE_IDENTIFIER` → `ENV["APP_BUNDLE_IDENTIFIER"]` |
+| Apple ID email | Secret `APPLE_ID` → `ENV["APPLE_ID"]` (used by `match` username) |
+| Team ID | Secret `APPLE_TEAM_ID` → `ENV["APPLE_TEAM_ID"]` |
+| Private cert repo URL | Secret `MATCH_GIT_URL` → `ENV["MATCH_GIT_URL"]` |
 
 The bundle ID `com.apple.ml.FastVLM` baked into [`project.pbxproj`](ml-fastvlm/app/FastVLM.xcodeproj/project.pbxproj)
 **must** be overridden because no non-Apple team can sign with that
@@ -98,7 +102,8 @@ prefix. The fastlane `Fastfile` injects the override at build time via
 
 ## Phase 0d — Apple credentials + GitHub Secrets
 
-You need three pieces of Apple-side data and three GitHub Secrets.
+You need Apple-side accounts/keys and **GitHub Actions secrets** (no
+credentials committed in the repo).
 
 ### 1. Register the bundle ID with Apple
 
@@ -149,10 +154,11 @@ You need three pieces of Apple-side data and three GitHub Secrets.
 ### 5. Add GitHub Secrets
 
 Settings → Secrets and variables → Actions → New repository secret. Add
-each of the seven below. (Two are optional; the other five are required.)
+every **Required** row below. `TAVILY_API_KEY` is optional.
 
 | Secret name | Value | Required? |
 | --- | --- | --- |
+| `APPLE_ID` | The **Apple ID email** you use for the Developer Program / App Store Connect (same account that owns the app). Used by **fastlane match** as `username`. | **Required** for `match` on CI |
 | `MATCH_PASSWORD` | A new long passphrase you invent. Save it in your password manager. Used to encrypt the cert repo. | Required |
 | `MATCH_GIT_URL` | HTTPS URL of `iris-certs` (e.g. `https://github.com/you/iris-certs.git`) | Required |
 | `MATCH_GIT_BASIC_AUTHORIZATION` | The base64 string from Phase 0d step 3.4 | Required |
