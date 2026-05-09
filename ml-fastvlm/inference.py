@@ -111,17 +111,17 @@ class EdgeAgent:
 
         # Phase 3: Chain-of-Thought Agentic Instructions
         rule_instruction = (
-            "You are an Agentic Vision AI. Follow this internal logic:\n"
-            "1. DESCRIBE: What text or objects do you see in the image?\n"
-            "2. ANALYZE: What is the user's core question?\n"
-            "3. DECIDE: Do you need a real-time web search (Tavily) to answer this accurately?\n"
-            "   - Use 'web_search' if the question is about news, current events, or facts you aren't 100% sure of.\n"
-            "   - Answer directly if it's a simple math problem, a known definition, or general knowledge.\n\n"
-            "Output your reasoning first, then a JSON object at the end.\n"
-            "JSON Format: {\"text_in_image\": \"<question>\", \"needs_search\": true/false, \"answer\": \"<your direct answer or search query>\"}\n"
+            "You are an expert Vision AI. Your primary job is to read the image and provide the correct direct answer.\n"
+            "Rules:\n"
+            "1. Read the text or question in the image.\n"
+            "2. Think step-by-step and answer the question using your own knowledge (math, history, science, coding, general facts).\n"
+            "3. ONLY set needs_search to true if the question requires live, real-time data (like today's weather, current prices, recent news) OR if you absolutely cannot answer it without the internet.\n"
+            "4. NEVER search for generic phrases like 'what is the question'.\n\n"
+            "Output your reasoning first, then a JSON object at the exact end.\n"
+            "JSON Format: {\"extracted_question\": \"<text read from image>\", \"needs_search\": false, \"search_query\": \"<only if search needed>\", \"answer\": \"<your final direct answer>\"}\n"
         )
 
-        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image."
+        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image and answer the question."
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
         formatted_prompt = conv.get_prompt()
@@ -174,9 +174,10 @@ class EdgeAgent:
         full_raw_text = full_raw_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
         
         # Extract JSON from the end of the chain-of-thought
-        text_in_image = ""
+        extracted_question = ""
         needs_search = False
         llm_answer = ""
+        search_query = ""
         
         try:
             json_start = full_raw_text.rfind("{")
@@ -184,22 +185,30 @@ class EdgeAgent:
                 json_str = full_raw_text[json_start:]
                 if not json_str.endswith("}"): json_str += '"}'
                 payload = json.loads(json_str)
-                text_in_image = payload.get("text_in_image", "")
+                extracted_question = payload.get("extracted_question", "")
                 needs_search = payload.get("needs_search", False)
+                search_query = payload.get("search_query", "")
                 llm_answer = payload.get("answer", "")
         except:
             # Fallback regex if JSON is malformed
-            m = re.search(r'"text_in_image":\s*"([^"]+)"', full_raw_text)
-            if m: text_in_image = m.group(1)
+            m = re.search(r'"answer":\s*"([^"]+)"', full_raw_text)
+            if m: llm_answer = m.group(1)
             needs_search = "needs_search\": true" in full_raw_text.lower()
 
         # --- Agentic Decision Logic ---
         if needs_search and "web_search" in AVAILABLE_TOOLS:
-            search_query = llm_answer if llm_answer else text_in_image
-            yield f"\n[\U0001f310 Decided: Search Required] -> '{search_query}'"
-            result = AVAILABLE_TOOLS["web_search"](search_query)
-            yield f"\n\U0001f4ac Final Answer:\n{result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tavily AI"
+            final_query = search_query if search_query else (extracted_question if extracted_question else llm_answer)
+            # Guard against the LLM searching for generic/meta prompts
+            bad_queries = ["what is the question", "what is the question?", "what is the question and answer for this image?"]
+            if not final_query or final_query.lower().strip() in bad_queries:
+                # If it's a bad query, just fallback to direct answer
+                yield f"\n\U0001f4ac Direct Answer: {llm_answer if llm_answer else full_raw_text.split('{')[0].strip()}"
+                yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) Internal Knowledge"
+            else:
+                yield f"\n[\U0001f310 Decided: Search Required] -> '{final_query}'"
+                result = AVAILABLE_TOOLS["web_search"](final_query)
+                yield f"\n\U0001f4ac Final Answer:\n{result}"
+                yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tavily AI"
         else:
             if not llm_answer:
                 # If it didn't give an answer in JSON, use the reasoning part
