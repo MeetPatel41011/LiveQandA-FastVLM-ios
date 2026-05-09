@@ -4,7 +4,7 @@ import os
 
 # --- CONFIGURATION ---
 # Replace this with the link from your Google Colab box
-BACKEND_URL = "https://twelve-plants-sneeze.loca.lt"
+BACKEND_URL = "https://cold-teeth-enjoy.loca.lt"
 
 # Path to any image file on your computer (jpg or png)
 IMAGE_PATH = "cuss-todo.png" 

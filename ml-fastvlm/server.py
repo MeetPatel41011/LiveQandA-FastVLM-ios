@@ -59,30 +59,45 @@ def decode_base64_image(base64_string: str) -> np.ndarray:
     img_cv2 = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     return img_cv2
 
-@app.post("/api/analyze", response_model=AnalyzeResponse)
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
+
+@app.post("/api/analyze")
 async def analyze_image(request: AnalyzeRequest):
     if agent is None:
         raise HTTPException(status_code=500, detail="EdgeAgent is not initialized.")
     
-    try:
-        # Decode image
-        frame = decode_base64_image(request.image_base64)
-        if frame is None:
-            raise ValueError("Could not decode image.")
-        
-        # Run inference (consuming the generator)
-        stream = agent.generate_stream(image=frame, prompt=request.prompt)
-        
-        full_response = ""
-        for chunk in stream:
-            full_response += chunk
+    async def event_generator():
+        try:
+            # Decode image
+            frame = decode_base64_image(request.image_base64)
+            if frame is None:
+                yield "data: " + json.dumps({"error": "Could not decode image"}) + "\n\n"
+                return
             
-        return AnalyzeResponse(result=full_response.strip())
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+            # 1. Immediate acknowledgement
+            yield "data: " + json.dumps({"status": "thinking", "message": "Vision engine active..."}) + "\n\n"
+            
+            # 2. Run inference (consuming the generator)
+            # We wrap the blocking generator in an async-friendly way
+            stream = agent.generate_stream(image=frame, prompt=request.prompt)
+            
+            full_response = ""
+            for chunk in stream:
+                full_response += chunk
+                # Send the partial response to the frontend
+                yield "data: " + json.dumps({"status": "answering", "chunk": chunk, "full_text": full_response}) + "\n\n"
+                await asyncio.sleep(0.01) # Yield control
+                
+            yield "data: " + json.dumps({"status": "complete", "full_text": full_response.strip()}) + "\n\n"
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield "data: " + json.dumps({"status": "error", "message": str(e)}) + "\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     import uvicorn

@@ -104,6 +104,81 @@ body {
 .status-stable { color: var(--status-stable); }
 .status-analyzing { color: var(--accent-color); animation: pulse 1.5s infinite; }
 
+/* Instruction Box */
+.instruction-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--overlay-bg);
+  padding: 32px;
+  border-radius: 24px;
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  text-align: center;
+  max-width: 80%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  z-index: 5;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.instruction-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.instruction-box h2 {
+  font-size: 20px;
+  margin-bottom: 8px;
+  color: var(--accent-color);
+}
+
+.instruction-box p {
+  font-size: 14px;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+/* Enhanced Drawer Styles */
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-idle);
+}
+
+.status-dot.scanning { background: var(--status-motion); animation: blink 0.8s infinite; }
+.status-dot.thinking { background: var(--accent-color); animation: blink 0.5s infinite; }
+.status-dot.answering { background: var(--status-stable); }
+
+.placeholder-text {
+  font-style: italic;
+  opacity: 0.5;
+  padding: 20px 0;
+}
+
+@keyframes blink {
+  0% { opacity: 0.2; }
+  50% { opacity: 1; }
+  100% { opacity: 0.2; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translate(-50%, -40%); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+
 @keyframes pulse {
   0% { opacity: 0.6; }
   50% { opacity: 1; }
