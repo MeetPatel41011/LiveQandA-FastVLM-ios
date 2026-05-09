@@ -119,12 +119,15 @@ class EdgeAgent:
         rule_instruction = (
             "You are an expert Vision AI. Your primary job is to read the image and provide the correct direct answer.\n"
             "Rules:\n"
-            "1. Read the text or question in the image. If there is NO readable text or question (e.g. just a person's face), set answer to 'No question detected. Please show the text clearly.' and stop.\n"
-            "2. Think step-by-step and answer the question using your own knowledge (math, history, science, coding, general facts).\n"
-            "3. ONLY set needs_search to true if the question requires live, real-time data (like today's weather, current prices, recent news) OR if you absolutely cannot answer it without the internet.\n"
-            "4. NEVER search for generic phrases like 'what is the question'.\n\n"
+            "1. Read the exact text or question in the image. If there is NO readable text (e.g. just a person's face), set answer to 'No question detected. Please show the text clearly.' and stop.\n"
+            "2. Think step-by-step and write down your reasoning.\n"
+            "3. Tool Selection: You have access to tools. Choose ONE tool if needed:\n"
+            "   - 'calculator': Use for ALL math equations (e.g., '12 * 45', '100 / 4').\n"
+            "   - 'matrix': Use for matrix multiplication.\n"
+            "   - 'web_search': ONLY use for live, real-time data (weather, news) or highly specific facts. NEVER search for generic phrases like 'what is the question'.\n"
+            "   - 'none': Use your own knowledge for general facts, history, science, coding.\n"
             "Output your reasoning first, then a JSON object at the exact end.\n"
-            "JSON Format: {\"extracted_question\": \"<text read from image>\", \"needs_search\": false, \"search_query\": \"<only if search needed>\", \"answer\": \"<your final direct answer>\"}\n"
+            "JSON Format: {\"extracted_question\": \"<text read from image>\", \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"<exact equation or search query>\", \"answer\": \"<your final direct answer>\"}\n"
         )
 
         qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image and answer the question."
@@ -179,11 +182,19 @@ class EdgeAgent:
 
         full_raw_text = full_raw_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
         
+        # --- Option 1: Log the raw reasoning for analysis ---
+        try:
+            reasoning_part = full_raw_text.split("{")[0].strip()
+            with open("reasoning_logs.txt", "a", encoding="utf-8") as f:
+                f.write(f"--- LOG START ---\n{time.strftime('%Y-%m-%d %H:%M:%S')}\nREASONING:\n{reasoning_part}\nRAW_OUTPUT:\n{full_raw_text}\n--- LOG END ---\n\n")
+        except Exception as e:
+            print(f"Failed to log reasoning: {e}")
+
         # Extract JSON from the end of the chain-of-thought
         extracted_question = ""
-        needs_search = False
+        tool_needed = "none"
+        tool_query = ""
         llm_answer = ""
-        search_query = ""
         
         try:
             json_start = full_raw_text.rfind("{")
@@ -192,30 +203,50 @@ class EdgeAgent:
                 if not json_str.endswith("}"): json_str += '"}'
                 payload = json.loads(json_str)
                 extracted_question = payload.get("extracted_question", "")
-                needs_search = payload.get("needs_search", False)
-                search_query = payload.get("search_query", "")
+                tool_needed = payload.get("tool_needed", "none").lower()
+                tool_query = payload.get("tool_query", "")
                 llm_answer = payload.get("answer", "")
         except:
             # Fallback regex if JSON is malformed
             m = re.search(r'"answer":\s*"([^"]+)"', full_raw_text)
             if m: llm_answer = m.group(1)
-            needs_search = "needs_search\": true" in full_raw_text.lower()
+            
+            # Fallback tool detection from raw text
+            if "tool_needed\": \"calculator" in full_raw_text.lower(): tool_needed = "calculator"
+            elif "tool_needed\": \"matrix" in full_raw_text.lower(): tool_needed = "matrix"
+            elif "tool_needed\": \"web_search" in full_raw_text.lower(): tool_needed = "web_search"
+            
+            m_query = re.search(r'"tool_query":\s*"([^"]+)"', full_raw_text)
+            if m_query: tool_query = m_query.group(1)
 
         # --- Agentic Decision Logic ---
-        if needs_search and "web_search" in AVAILABLE_TOOLS:
-            final_query = search_query if search_query else (extracted_question if extracted_question else llm_answer)
-            # Guard against the LLM searching for generic/meta prompts
+        query_to_use = tool_query if tool_query else (extracted_question if extracted_question else llm_answer)
+        
+        if tool_needed == "calculator" and "calculator" in AVAILABLE_TOOLS:
+            yield f"\n[\U0001F522 Decided: Math Required] -> '{query_to_use}'"
+            result = AVAILABLE_TOOLS["calculator"](query_to_use)
+            yield f"\n\U0001f4ac Final Answer:\n{result}"
+            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Python Calculator Tool"
+            
+        elif tool_needed == "matrix" and "matrix" in AVAILABLE_TOOLS:
+            yield f"\n[\U0001F4BE Decided: Matrix Math Required] -> '{query_to_use}'"
+            result = AVAILABLE_TOOLS["matrix"](query_to_use)
+            yield f"\n\U0001f4ac Final Answer:\n{result}"
+            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + NumPy Matrix Tool"
+            
+        elif tool_needed == "web_search" and "web_search" in AVAILABLE_TOOLS:
             bad_queries = ["what is the question", "what is the question?", "what is the question and answer for this image?"]
-            if not final_query or final_query.lower().strip() in bad_queries:
+            if not query_to_use or query_to_use.lower().strip() in bad_queries:
                 # If it's a bad query, just fallback to direct answer
                 yield f"\n\U0001f4ac Direct Answer: {llm_answer if llm_answer else full_raw_text.split('{')[0].strip()}"
                 yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) Internal Knowledge"
             else:
-                yield f"\n[\U0001f310 Decided: Search Required] -> '{final_query}'"
-                result = AVAILABLE_TOOLS["web_search"](final_query)
+                yield f"\n[\U0001f310 Decided: Search Required] -> '{query_to_use}'"
+                result = AVAILABLE_TOOLS["web_search"](query_to_use)
                 yield f"\n\U0001f4ac Final Answer:\n{result}"
                 yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tavily AI"
-        else:
+                
+        else: # "none" or tool not available
             if not llm_answer:
                 # If it didn't give an answer in JSON, use the reasoning part
                 llm_answer = full_raw_text.split("{")[0].strip()
