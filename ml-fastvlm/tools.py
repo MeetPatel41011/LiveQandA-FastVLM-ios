@@ -76,72 +76,54 @@ def execute_matrix_multiply(problem_text: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# Tool 3: Web Search (Multi-Source: Wikipedia + Tavily + DDG)
+# Tool 3: Web Search (Powered by Tavily AI)
 # ─────────────────────────────────────────────
 def execute_web_search(query: str) -> str:
     """
-    Advanced multi-source search.
-    1. Wikipedia (Definitions)
-    2. Tavily (High-quality AI Search)
-    3. DuckDuckGo (Fallback/News)
+    Perform a high-precision web search using Tavily AI.
+    Replaces Wikipedia and DuckDuckGo for better accuracy.
     """
     import os
+    import requests
     from dotenv import load_dotenv
     load_dotenv()
-    
-    # Clean the query
+
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return "Error: TAVILY_API_KEY not found in environment."
+
+    # Clean the query (remove any JSON artifacts if the LLM leaked them)
     if '{' in query:
         query = re.sub(r'\{.*?\}', '', query).strip()
     
-    is_definition = any(word in query.lower() for word in ["what is", "who is", "define", "meaning of"])
-    clean_query = re.sub(r'^(what is|who is|where is|when was|tell me about|search for|how much is|current price of|define)\s+', '', query, flags=re.IGNORECASE)
-    clean_query = clean_query.strip().rstrip('?').strip()
-    
-    if not clean_query:
-        return "Error: Empty search query."
-
-    # --- Step 1: Wikipedia Check (Zero-cost, High-quality definitions) ---
-    if is_definition:
-        try:
-            import requests
-            wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{clean_query.replace(' ', '_')}"
-            response = requests.get(wiki_url, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if 'extract' in data:
-                    return f"\U0001f4da Wikipedia: {data['extract']}"
-        except Exception:
-            pass
-
-    # --- Step 2: Tavily Search (Best AI Results) ---
-    tavily_key = os.getenv("TAVILY_API_KEY")
-    if tavily_key:
-        try:
-            from tavily import TavilyClient
-            tavily = TavilyClient(api_key=tavily_key)
-            # Use 'search' for a comprehensive answer
-            response = tavily.search(query=query, search_depth="basic", max_results=1)
-            if response and response['results']:
-                result = response['results'][0]
-                content = result.get('content', '')
-                return f"\U0001f310 Tavily Search: {content}"
-        except Exception as e:
-            print(f"DEBUG: Tavily error: {e}")
-
-    # --- Step 3: DuckDuckGo Fallback ---
+    print(f"DEBUG: Searching Tavily for: {query}")
     try:
-        import warnings
-        from duckduckgo_search import DDGS
-        warnings.filterwarnings("ignore", message="This package .* has been renamed to `ddgs`!")
+        # We use the raw requests approach to avoid dependency issues in Colab
+        url = "https://api.tavily.com/search"
+        payload = {
+            "api_key": api_key,
+            "query": query,
+            "search_depth": "smart",
+            "include_answer": True,
+            "max_results": 1
+        }
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+        data = response.json()
         
-        with DDGS() as ddgs:
-            results = list(ddgs.text(clean_query, max_results=1))
-            if results:
-                return f"\U0001f50e Web Fallback: {results[0].get('body', '')}"
-    except Exception:
-        pass
-
-    return f"Sorry, I couldn't find a specific answer for '{clean_query}'."
+        # 1. Return the AI-generated answer if available (best)
+        if data.get("answer"):
+            return f"\U0001f310 Tavily AI: {data['answer']}"
+            
+        # 2. Otherwise return the top search result
+        results = data.get("results", [])
+        if results:
+            content = results[0].get('content', '')
+            return f"\U0001f310 Tavily Search: {content}"
+            
+        return f"No relevant information found for '{query}' on the web."
+    except Exception as e:
+        return f"Tavily Search Error: {str(e)}"
 
 
 # ─────────────────────────────────────────────
