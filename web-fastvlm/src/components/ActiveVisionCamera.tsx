@@ -3,13 +3,14 @@
 import React, { useEffect, useRef, useState } from "react";
 
 interface ActiveVisionCameraProps {
+  onCaptureStart?: () => void;
   onStableFrame: (base64Image: string) => void;
   onStop?: () => void;
   isProcessing: boolean;
   shouldEnable: boolean;
 }
 
-export default function ActiveVisionCamera({ onStableFrame, onStop, isProcessing, shouldEnable }: ActiveVisionCameraProps) {
+export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onStop, isProcessing, shouldEnable }: ActiveVisionCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [motionScore, setMotionScore] = useState<number>(0);
@@ -26,6 +27,8 @@ export default function ActiveVisionCamera({ onStableFrame, onStop, isProcessing
   const triggerManualCapture = async () => {
     if (!videoRef.current || isProcessing) return;
     
+    if (onCaptureStart) onCaptureStart();
+
     const video = videoRef.current;
     const frames: { data: string; score: number }[] = [];
     
@@ -79,10 +82,16 @@ export default function ActiveVisionCamera({ onStableFrame, onStop, isProcessing
     setHasMounted(true);
     if (!shouldEnable) return;
 
+    let isMounted = true;
+
     // Start camera
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: "environment", width: 1280, height: 720 } })
       .then((stream) => {
+        if (!isMounted) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
@@ -144,6 +153,7 @@ export default function ActiveVisionCamera({ onStableFrame, onStop, isProcessing
     animationFrameId = requestAnimationFrame(processFrame);
 
     return () => {
+      isMounted = false;
       cancelAnimationFrame(animationFrameId);
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;

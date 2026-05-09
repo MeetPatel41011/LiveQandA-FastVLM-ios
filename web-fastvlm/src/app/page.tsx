@@ -10,15 +10,15 @@ export default function Home() {
   const [backendUrl, setBackendUrl] = useState("");
   const clearTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleStableFrame = async (base64Image: string) => {
-    if (!backendUrl) return; // Guard clause
-    
-    // If a new subjects triggers a scan, clear existing result and timers
+  const handleCaptureStart = () => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
-    
     setStatus("SCANNING");
     setResult(null);
     setError(null);
+  };
+
+  const handleStableFrame = async (base64Image: string) => {
+    if (!backendUrl) return; // Guard clause
 
     try {
       const response = await fetch(`${backendUrl}/api/analyze`, {
@@ -98,6 +98,7 @@ export default function Home() {
       </div>
       
       <ActiveVisionCamera 
+        onCaptureStart={handleCaptureStart}
         onStableFrame={handleStableFrame} 
         onStop={handleStop}
         isProcessing={status === "THINKING" || status === "ANSWERING" || status === "SCANNING"} 
