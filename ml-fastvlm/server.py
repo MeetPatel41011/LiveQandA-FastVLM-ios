@@ -28,6 +28,10 @@ app.add_middleware(
 # Global agent instance
 agent = None
 
+@app.get("/")
+async def root():
+    return {"status": "ready", "agent_initialized": agent is not None}
+
 @app.on_event("startup")
 async def startup_event():
     global agent
