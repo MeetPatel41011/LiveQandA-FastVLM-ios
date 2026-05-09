@@ -90,6 +90,10 @@ class EdgeAgent:
         # Push model to device (builder handles some, but we ensure it here)
         self.model.to(device=device, dtype=torch_dtype)
         
+        # Update model name for attribution
+        global MODEL_NAME
+        MODEL_NAME = "llava-fastvithd_1.5b" if "1.5b" in model_path.lower() else "llava-fastvithd_0.5b"
+
         self.warmup()
         self.warmup()
 
@@ -196,7 +200,7 @@ class EdgeAgent:
             yield f"[\U0001f310 Searching Web...] {text_in_image}"
             result = AVAILABLE_TOOLS["web_search"](text_in_image)
             yield f"\n\U0001f4ac Answer (Live):\n{result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tool (web_search/duckduckgo)"
+            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tool (web_search/tavily_ai)"
         else:
             yield f"\U0001f4ac Answer: {llm_answer}"
             yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME})"

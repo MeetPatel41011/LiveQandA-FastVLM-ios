@@ -94,9 +94,19 @@ def execute_web_search(query: str) -> str:
 
     # Clean the query (remove any JSON artifacts if the LLM leaked them)
     if '{' in query:
-        query = re.sub(r'\{.*?\}', '', query).strip()
+        # Try to extract content between quotes if it looks like JSON
+        match = re.search(r'"(?:text_in_image|query)":\s*"([^"]+)"', query)
+        if match:
+            query = match.group(1)
+        else:
+            # Fallback: just remove curly braces and extra quotes
+            query = query.replace('{', '').replace('}', '').replace('"', '').strip()
     
-    print(f"DEBUG: Searching Tavily for: {query}")
+    query = query.strip()
+    if not query:
+        return "Error: Cleaned search query is empty."
+
+    print(f"DEBUG: Sending to Tavily -> '{query}'")
     try:
         # We use the raw requests approach to avoid dependency issues in Colab
         url = "https://api.tavily.com/search"
@@ -107,8 +117,11 @@ def execute_web_search(query: str) -> str:
             "include_answer": True,
             "max_results": 1
         }
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
+        response = requests.post(url, json=payload, timeout=15)
+        
+        if response.status_code != 200:
+            return f"Tavily API Error ({response.status_code}): {response.text}"
+            
         data = response.json()
         
         # 1. Return the AI-generated answer if available (best)
