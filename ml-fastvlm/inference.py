@@ -117,11 +117,12 @@ class EdgeAgent:
 
         # Phase 3: Chain-of-Thought Agentic Instructions
         rule_instruction = (
-            "You are an expert Vision AI. Your primary job is to read the image and provide the correct direct answer.\n"
+            "You are an expert, fast-thinking Vision AI. Your primary job is to read the image and provide the correct direct answer.\n"
             "Rules:\n"
             "1. Read the exact text or question in the image. If there is NO readable text (e.g. just a person's face), set answer to 'No question detected. Please show the text clearly.' and stop.\n"
-            "2. Think step-by-step and write down your reasoning.\n"
-            "3. Tool Selection: You have access to tools. Choose ONE tool if needed:\n"
+            "2. Speed & Reasoning: Keep your reasoning ruthlessly short (max 15 words).\n"
+            "3. Quality: If a term is ambiguous (e.g., 'Gemini', 'Apple'), be comprehensive and mention the major contexts (e.g., Google AI and Astrology).\n"
+            "4. Tool Selection: You have access to tools. Choose ONE tool if needed:\n"
             "   - 'calculator': Use for ALL math equations (e.g., '12 * 45', '100 / 4').\n"
             "   - 'matrix': Use for matrix multiplication.\n"
             "   - 'web_search': ONLY use for live, real-time data (weather, news) or highly specific facts. NEVER search for generic phrases like 'what is the question'.\n"
