@@ -113,7 +113,7 @@ def execute_web_search(query: str) -> str:
         payload = {
             "api_key": api_key,
             "query": query,
-            "search_depth": "smart",
+            "search_depth": "basic",
             "include_answer": True,
             "max_results": 1
         }
