@@ -1,8 +1,14 @@
 import torch, numpy as np, time, cv2, os, json, re
-from transformers import TextIteratorStreamer
+from transformers import TextIteratorStreamer, StoppingCriteria, StoppingCriteriaList
 from typing import Generator
-from threading import Thread
+from threading import Thread, Event
 from PIL import Image
+
+class StopOnEventCriteria(StoppingCriteria):
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+    def __call__(self, input_ids, scores, **kwargs):
+        return self.stop_event.is_set()
 
 try:
     from llava.model.builder import load_pretrained_model
