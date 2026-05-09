@@ -23,16 +23,28 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
     lastFrame: null as string | null,
   });
 
+  const captureActive = useRef(false);
+
   const triggerManualCapture = async () => {
     if (!videoRef.current || isProcessing) return;
     
+    captureActive.current = true;
     if (onCaptureStart) onCaptureStart();
 
+    // 1.5s delay to allow the user to position the paper
+    for (let i = 0; i < 15; i++) {
+      if (!captureActive.current) return;
+      await new Promise(r => setTimeout(r, 100));
+    }
+
     const video = videoRef.current;
+    if (!video) return;
+
     const frames: { data: string; score: number }[] = [];
     
     // Step 1: Burst Capture (5 frames over 500ms)
     for (let i = 0; i < 5; i++) {
+      if (!captureActive.current) return;
       const fullCanvas = document.createElement("canvas");
       fullCanvas.width = video.videoWidth;
       fullCanvas.height = video.videoHeight;
@@ -64,6 +76,8 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
       await new Promise(r => setTimeout(r, 100));
     }
 
+    if (!captureActive.current) return;
+
     // Step 2: Select Sharpest Frame
     const bestFrame = frames.sort((a, b) => b.score - a.score)[0];
     onStableFrame(bestFrame.data);
@@ -71,6 +85,7 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
 
   const handleButtonClick = () => {
     if (isProcessing) {
+      captureActive.current = false;
       if (onStop) onStop();
       return;
     }

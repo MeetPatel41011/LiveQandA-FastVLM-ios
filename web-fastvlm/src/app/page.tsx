@@ -161,7 +161,7 @@ export default function Home() {
         </div>
       ) : (
         <div className="placeholder-text">
-          {status === "SCANNING" ? "Capturing pixels..." : "AI is thinking..."}
+          {status === "SCANNING" ? "Position your question in frame..." : "AI is thinking..."}
         </div>
       )}
       </div>    </main>
