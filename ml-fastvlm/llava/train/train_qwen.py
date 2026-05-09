@@ -898,7 +898,8 @@ class LazySupervisedDataset(Dataset):
         #list_data_dict = json.load(open(data_path, "r"))
         list_data_dict = []
         for i, _data_path in enumerate(data_path):
-            data = json.load(open(_data_path, "r"))
+            with open(_data_path, "r") as f:
+                data = json.load(f)
             data = [{**entry, 'img_path_idx': i} for entry in data]
             list_data_dict += data
 

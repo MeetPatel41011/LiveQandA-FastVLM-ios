@@ -69,6 +69,8 @@ async def analyze_image(request: AnalyzeRequest):
         raise HTTPException(status_code=500, detail="EdgeAgent is not initialized.")
     
     async def event_generator():
+        import threading
+        stop_event = threading.Event()
         try:
             # Decode image
             frame = decode_base64_image(request.image_base64)
@@ -81,7 +83,7 @@ async def analyze_image(request: AnalyzeRequest):
             
             # 2. Run inference (consuming the generator)
             # We wrap the blocking generator in an async-friendly way
-            stream = agent.generate_stream(image=frame, prompt=request.prompt)
+            stream = agent.generate_stream(image=frame, prompt=request.prompt, stop_event=stop_event)
             
             full_response = ""
             for chunk in stream:
@@ -92,6 +94,9 @@ async def analyze_image(request: AnalyzeRequest):
                 
             yield "data: " + json.dumps({"status": "complete", "full_text": full_response.strip()}) + "\n\n"
             
+        except asyncio.CancelledError:
+            stop_event.set()
+            raise
         except Exception as e:
             import traceback
             traceback.print_exc()

@@ -136,6 +136,9 @@ class EdgeAgent:
 
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
+        if stop_event is None:
+            stop_event = Event()
+
         generation_kwargs = dict(
             inputs=input_ids,
             images=image_tensor.unsqueeze(0),
@@ -146,22 +149,27 @@ class EdgeAgent:
             use_cache=True,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
-            repetition_penalty=1.1
+            repetition_penalty=1.1,
+            stopping_criteria=StoppingCriteriaList([StopOnEventCriteria(stop_event)])
         )
 
         thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
         thread.start()
 
         full_raw_text = ""
-        for new_text in streamer:
-            if stop_event and stop_event.is_set():
-                break
-            full_raw_text += new_text
-            # Stream the "Reasoning" part to the user live
-            if "{" not in full_raw_text:
-                yield new_text
-            if STOP_TOK_A in new_text or STOP_TOK_B in new_text:
-                break
+        try:
+            for new_text in streamer:
+                if stop_event.is_set():
+                    break
+                full_raw_text += new_text
+                # Stream the "Reasoning" part to the user live
+                if "{" not in full_raw_text:
+                    yield new_text
+                if STOP_TOK_A in new_text or STOP_TOK_B in new_text:
+                    break
+        except GeneratorExit:
+            stop_event.set()
+            raise
 
         full_raw_text = full_raw_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
         

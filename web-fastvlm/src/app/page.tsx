@@ -4,14 +4,17 @@ import React, { useState, useRef } from "react";
 import ActiveVisionCamera from "@/components/ActiveVisionCamera";
 
 export default function Home() {
-  const [status, setStatus] = useState<"IDLE" | "SCANNING" | "THINKING" | "ANSWERING">("IDLE");
+  const [status, setStatus] = useState<"IDLE" | "SCANNING" | "THINKING" | "ANSWERING" | "COMPLETE">("IDLE");
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backendUrl, setBackendUrl] = useState("");
   const clearTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleCaptureStart = () => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    abortControllerRef.current = new AbortController();
     setStatus("SCANNING");
     setResult(null);
     setError(null);
@@ -28,6 +31,7 @@ export default function Home() {
           "bypass-tunnel-reminder": "true",
         },
         body: JSON.stringify({ image_base64: base64Image }),
+        signal: abortControllerRef.current?.signal,
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -57,6 +61,7 @@ export default function Home() {
               setStatus("ANSWERING");
               setResult(data.full_text);
             } else if (data.status === "complete") {
+              setStatus("COMPLETE");
               setResult(data.full_text);
               // Start the 60-second persistence timer
               clearTimerRef.current = setTimeout(() => {
@@ -71,15 +76,23 @@ export default function Home() {
           }
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        console.log("Fetch aborted");
+        return;
+      }
       console.error(err);
-      setError(err.message || "An error occurred");
+      setError(err instanceof Error ? err.message : "An error occurred");
       setStatus("IDLE");
     }
   };
 
   const handleStop = () => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setStatus("IDLE");
     setResult(null);
     setError(null);
@@ -97,61 +110,60 @@ export default function Home() {
         />
       </div>
       
-      <ActiveVisionCamera 
-        onCaptureStart={handleCaptureStart}
-        onStableFrame={handleStableFrame} 
-        onStop={handleStop}
-        isProcessing={status === "THINKING" || status === "ANSWERING" || status === "SCANNING"} 
-        shouldEnable={backendUrl.length > 5}
+      <ActiveVisionCamera
+      onCaptureStart={handleCaptureStart}
+      onStableFrame={handleStableFrame} 
+      onStop={handleStop}
+      isProcessing={status === "THINKING" || status === "ANSWERING" || status === "SCANNING" || status === "COMPLETE"} 
+      shouldEnable={backendUrl.length > 5}
       />
 
       {/* Setup Prompt */}
       {!backendUrl && (
-        <div className="instruction-box setup-box">
-          <div className="instruction-icon">🔗</div>
-          <h2>Connect to Backend</h2>
-          <p>Please paste your Localtunnel URL from Colab in the box at the top right to start the camera.</p>
-        </div>
+      <div className="instruction-box setup-box">
+        <div className="instruction-icon">🔗</div>
+        <h2>Connect to Backend</h2>
+        <p>Please paste your Localtunnel URL from Colab in the box at the top right to start the camera.</p>
+      </div>
       )}
 
       {/* Instruction Box - Only shows if connected, idle and no result */}
       {backendUrl && status === "IDLE" && !result && !error && (
-        <div className="instruction-box">
-          <div className="instruction-icon">👁️</div>
-          <h2>Waiting for Question</h2>
-          <p>Hold a written or verbal question steady in front of the camera to get an answer.</p>
-        </div>
+      <div className="instruction-box">
+        <div className="instruction-icon">👁️</div>
+        <h2>Waiting for Question</h2>
+        <p>Hold a written or verbal question steady in front of the camera to get an answer.</p>
+      </div>
       )}
-      
+
       {/* Result Bottom Sheet */}
       <div className={`result-drawer ${(result || error || status !== "IDLE") ? "open" : ""}`}>
-        <div className="drawer-handle"></div>
-        <div className="status-banner">
-          <span className={`status-dot ${status.toLowerCase()}`}></span>
-          {status === "IDLE" ? "System Ready" : (
-            <>
-              {status}... 
-              <span className="step-counter">
-                ({status === "SCANNING" ? "1/4" : 
-                  status === "THINKING" ? "2/4" : 
-                  status === "ANSWERING" ? "3/4" : "4/4"})
-              </span>
-            </>
-          )}
-        </div>
-        
-        {error ? (
-          <div className="error-message">⚠️ {error}</div>
-        ) : result ? (
-          <div className="result-content">
-            <pre>{result}</pre>
-          </div>
-        ) : (
-          <div className="placeholder-text">
-            {status === "SCANNING" ? "Capturing pixels..." : "AI is thinking..."}
-          </div>
+      <div className="drawer-handle"></div>
+      <div className="status-banner">
+        <span className={`status-dot ${status.toLowerCase()}`}></span>
+        {status === "IDLE" ? "System Ready" : (
+          <>
+            {status}... 
+            <span className="step-counter">
+              ({status === "SCANNING" ? "1/4" : 
+                status === "THINKING" ? "2/4" : 
+                status === "ANSWERING" ? "3/4" : "4/4"})
+            </span>
+          </>
         )}
       </div>
-    </main>
+
+      {error ? (
+        <div className="error-message">⚠️ {error}</div>
+      ) : result ? (
+        <div className="result-content">
+          <pre>{result}</pre>
+        </div>
+      ) : (
+        <div className="placeholder-text">
+          {status === "SCANNING" ? "Capturing pixels..." : "AI is thinking..."}
+        </div>
+      )}
+      </div>    </main>
   );
 }

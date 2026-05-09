@@ -26,7 +26,8 @@ def load_model_config(
     # Get config from yaml file
     if not os.path.exists(model_cfg_file):
         raise ValueError(f"Unsupported model name: {model_name}")
-    model_cfg = json.load(open(model_cfg_file, "r"))
+    with open(model_cfg_file, "r") as f:
+        model_cfg = json.load(f)
 
     return model_cfg
 

@@ -167,6 +167,7 @@ body {
 .status-dot.scanning { background: var(--status-motion); animation: blink 0.8s infinite; }
 .status-dot.thinking { background: var(--accent-color); animation: blink 0.5s infinite; }
 .status-dot.answering { background: var(--status-stable); }
+.status-dot.complete { background: var(--status-stable); box-shadow: 0 0 8px var(--status-stable); }
 
 .placeholder-text {
   font-style: italic;

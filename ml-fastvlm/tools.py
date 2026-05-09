@@ -13,7 +13,15 @@ def execute_calculator(equation: str) -> str:
     if not safe_equation:
         return f"Error: Empty expression from '{equation}'"
     try:
-        result = eval(safe_equation)
+        import ast, operator
+        _op_map = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.USub: operator.neg, ast.UAdd: operator.pos}
+        def _eval(node):
+            if isinstance(node, ast.Expression): return _eval(node.body)
+            elif isinstance(node, ast.Constant): return node.value
+            elif isinstance(node, ast.BinOp): return _op_map[type(node.op)](_eval(node.left), _eval(node.right))
+            elif isinstance(node, ast.UnaryOp): return _op_map[type(node.op)](_eval(node.operand))
+            else: raise ValueError("Unsupported syntax")
+        result = _eval(ast.parse(safe_equation, mode='eval'))
         return str(result)
     except Exception as e:
         return f"Error evaluating '{safe_equation}': {e}"
@@ -28,12 +36,9 @@ def _parse_complex(s: str) -> complex:
     s = re.sub(r'(?<![0-9])i', '1j', s)
     s = re.sub(r'([0-9])i', r'\1j', s)
     try:
-        return complex(eval(s))
+        return complex(s)
     except Exception:
-        try:
-            return complex(s)
-        except Exception:
-            return complex(0)
+        return complex(0)
 
 
 def execute_matrix_multiply(problem_text: str) -> str:

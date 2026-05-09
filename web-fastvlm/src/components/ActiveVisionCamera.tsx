@@ -13,7 +13,6 @@ interface ActiveVisionCameraProps {
 export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onStop, isProcessing, shouldEnable }: ActiveVisionCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [motionScore, setMotionScore] = useState<number>(0);
   const [status, setStatus] = useState<"IDLE" | "MOTION_DETECTED" | "STABLE">("IDLE");
   const [hasMounted, setHasMounted] = useState(false);
 
@@ -80,9 +79,13 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
 
   useEffect(() => {
     setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
     if (!shouldEnable) return;
 
     let isMounted = true;
+    const currentVideoRef = videoRef.current;
 
     // Start camera
     navigator.mediaDevices
@@ -92,8 +95,8 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+        if (currentVideoRef) {
+          currentVideoRef.srcObject = stream;
         }
       })
       .catch((err) => console.error("Error accessing camera:", err));
@@ -138,8 +141,6 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
       recentMotions.push(motion);
       if (recentMotions.length > 10) recentMotions.shift();
       
-      if (Math.random() < 0.2) setMotionScore(motion);
-      
       const avgMotion = recentMotions.reduce((a, b) => a + b, 0) / recentMotions.length;
       if (avgMotion < 4.0) setStatus("STABLE");
       else if (avgMotion > 8.0) setStatus("MOTION_DETECTED");
@@ -155,8 +156,8 @@ export default function ActiveVisionCamera({ onCaptureStart, onStableFrame, onSt
     return () => {
       isMounted = false;
       cancelAnimationFrame(animationFrameId);
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
+      if (currentVideoRef && currentVideoRef.srcObject) {
+        const stream = currentVideoRef.srcObject as MediaStream;
         stream.getTracks().forEach((track) => track.stop());
       }
     };
