@@ -4,34 +4,84 @@ import React, { useEffect, useRef, useState } from "react";
 
 interface ActiveVisionCameraProps {
   onStableFrame: (base64Image: string) => void;
+  onStop?: () => void;
   isProcessing: boolean;
+  shouldEnable: boolean;
 }
 
-export default function ActiveVisionCamera({ onStableFrame, isProcessing }: ActiveVisionCameraProps) {
+export default function ActiveVisionCamera({ onStableFrame, onStop, isProcessing, shouldEnable }: ActiveVisionCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [motionScore, setMotionScore] = useState<number>(0);
   const [status, setStatus] = useState<"IDLE" | "MOTION_DETECTED" | "STABLE">("IDLE");
   const [hasMounted, setHasMounted] = useState(false);
 
-  // Internal refs to track stability across frames without triggering re-renders for every frame
+  // Internal refs
   const stateRef = useRef({
     prevGrayData: null as Uint8ClampedArray | null,
     recentMotions: [] as number[],
-    hasNewContent: false,
-    lastInferenceTime: 0,
+    lastFrame: null as string | null,
   });
 
-  const MOTION_BASELINE = 8.0;
-  const STABLE_MAX_MOTION = 4.5;
-  const HISTORY_LENGTH = 8;
-  const COOLDOWN_MS = 5000;
+  const triggerManualCapture = async () => {
+    if (!videoRef.current || isProcessing) return;
+    
+    const video = videoRef.current;
+    const frames: { data: string; score: number }[] = [];
+    
+    // Step 1: Burst Capture (5 frames over 500ms)
+    for (let i = 0; i < 5; i++) {
+      const fullCanvas = document.createElement("canvas");
+      fullCanvas.width = video.videoWidth;
+      fullCanvas.height = video.videoHeight;
+      const fullCtx = fullCanvas.getContext("2d");
+      if (fullCtx) {
+        fullCtx.drawImage(video, 0, 0);
+        
+        // Basic Sharpness Score
+        const smallCanvas = document.createElement("canvas");
+        smallCanvas.width = 100;
+        smallCanvas.height = 100;
+        const smallCtx = smallCanvas.getContext("2d");
+        let score = 0;
+        if (smallCtx) {
+          smallCtx.drawImage(video, 0, 0, 100, 100);
+          const pixels = smallCtx.getImageData(0, 0, 100, 100).data;
+          let diff = 0;
+          for (let p = 0; p < pixels.length - 4; p += 4) {
+            diff += Math.abs(pixels[p] - pixels[p+4]);
+          }
+          score = diff;
+        }
+
+        frames.push({ 
+          data: fullCanvas.toDataURL("image/jpeg", 0.9), 
+          score 
+        });
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    // Step 2: Select Sharpest Frame
+    const bestFrame = frames.sort((a, b) => b.score - a.score)[0];
+    onStableFrame(bestFrame.data);
+  };
+
+  const handleButtonClick = () => {
+    if (isProcessing) {
+      if (onStop) onStop();
+      return;
+    }
+    triggerManualCapture();
+  };
 
   useEffect(() => {
     setHasMounted(true);
+    if (!shouldEnable) return;
+
     // Start camera
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "environment" } })
+      .getUserMedia({ video: { facingMode: "environment", width: 1280, height: 720 } })
       .then((stream) => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -42,7 +92,7 @@ export default function ActiveVisionCamera({ onStableFrame, isProcessing }: Acti
     let animationFrameId: number;
 
     const processFrame = () => {
-      if (!videoRef.current || !canvasRef.current || isProcessing) {
+      if (!videoRef.current || !canvasRef.current || !shouldEnable) {
         animationFrameId = requestAnimationFrame(processFrame);
         return;
       }
@@ -56,22 +106,18 @@ export default function ActiveVisionCamera({ onStableFrame, isProcessing }: Acti
         return;
       }
 
-      // Small resolution for motion calculation (64x64)
+      // Grayscale/Motion logic remains for the HUD metrics
       canvas.width = 64;
       canvas.height = 64;
       ctx.drawImage(video, 0, 0, 64, 64);
-
       const frameData = ctx.getImageData(0, 0, 64, 64).data;
       const currentGray = new Uint8ClampedArray(64 * 64);
-
       for (let i = 0, j = 0; i < frameData.length; i += 4, j++) {
-        // R, G, B to grayscale
         currentGray[j] = (frameData[i] + frameData[i + 1] + frameData[i + 2]) / 3;
       }
 
       const { prevGrayData, recentMotions } = stateRef.current;
       let motion = 0;
-
       if (prevGrayData) {
         let totalDiff = 0;
         for (let i = 0; i < currentGray.length; i++) {
@@ -79,50 +125,17 @@ export default function ActiveVisionCamera({ onStableFrame, isProcessing }: Acti
         }
         motion = totalDiff / currentGray.length;
       }
-
       stateRef.current.prevGrayData = currentGray;
-      
-      // Update rolling history
       recentMotions.push(motion);
-      if (recentMotions.length > HISTORY_LENGTH) {
-        recentMotions.shift();
-      }
-
-      // Only update UI state occasionally to prevent stutter
+      if (recentMotions.length > 10) recentMotions.shift();
+      
       if (Math.random() < 0.2) setMotionScore(motion);
+      
+      const avgMotion = recentMotions.reduce((a, b) => a + b, 0) / recentMotions.length;
+      if (avgMotion < 4.0) setStatus("STABLE");
+      else if (avgMotion > 8.0) setStatus("MOTION_DETECTED");
+      else setStatus("IDLE");
 
-      const now = Date.now();
-      if (now - stateRef.current.lastInferenceTime > COOLDOWN_MS && !isProcessing) {
-        if (motion > MOTION_BASELINE) {
-          stateRef.current.hasNewContent = true;
-          setStatus("MOTION_DETECTED");
-        }
-
-        const avgMotion = recentMotions.length === HISTORY_LENGTH 
-          ? recentMotions.reduce((a, b) => a + b, 0) / HISTORY_LENGTH 
-          : Infinity;
-
-        if (stateRef.current.hasNewContent && avgMotion < STABLE_MAX_MOTION) {
-          setStatus("STABLE");
-          stateRef.current.hasNewContent = false;
-          stateRef.current.lastInferenceTime = now;
-          
-          // Capture full resolution frame for AI
-          const fullCanvas = document.createElement("canvas");
-          fullCanvas.width = video.videoWidth;
-          fullCanvas.height = video.videoHeight;
-          const fullCtx = fullCanvas.getContext("2d");
-          if (fullCtx) {
-            fullCtx.drawImage(video, 0, 0);
-            const base64Image = fullCanvas.toDataURL("image/jpeg", 0.8);
-            onStableFrame(base64Image);
-          }
-        } else if (!stateRef.current.hasNewContent) {
-          setStatus("IDLE");
-        }
-      }
-
-      // Schedule next check (~10 fps is enough for motion gating)
       setTimeout(() => {
         animationFrameId = requestAnimationFrame(processFrame);
       }, 100);
@@ -137,7 +150,7 @@ export default function ActiveVisionCamera({ onStableFrame, isProcessing }: Acti
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [isProcessing, onStableFrame]);
+  }, [shouldEnable]);
 
   return (
     <div className="camera-container">
@@ -156,11 +169,21 @@ export default function ActiveVisionCamera({ onStableFrame, isProcessing }: Acti
       <canvas ref={canvasRef} style={{ display: "none" }} />
       
       <div className="hud-overlay">
-        <div className="hud-metric">Motion: {motionScore.toFixed(1)}</div>
-        <div className={`hud-status status-${status.toLowerCase()}`}>
-          {isProcessing ? "ANALYZING..." : status}
-        </div>
+        <div className="hud-metric">Stability: {status}</div>
+        {isProcessing && <div className="hud-status status-analyzing">AI IS WORKING...</div>}
       </div>
+
+      {shouldEnable && (
+        <div className={`capture-controls ${isProcessing ? "active" : ""}`}>
+          <button 
+            className={`shutter-button ${isProcessing ? "stop-mode" : ""} ${status === "STABLE" && !isProcessing ? "ready" : ""}`}
+            onClick={handleButtonClick}
+            aria-label={isProcessing ? "Stop AI" : "Capture Question"}
+          >
+            <div className="shutter-inner"></div>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

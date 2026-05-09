@@ -109,21 +109,22 @@ class EdgeAgent:
 
         conv = conversation_lib.conv_templates["qwen_2"].copy()
 
+        # Phase 3: Chain-of-Thought Agentic Instructions
         rule_instruction = (
-            "You are a high-precision OCR and fact-checking agent.\n"
-            "Examine the image and extract the EXACT question text written in it.\n"
-            "You MUST return ONLY a JSON object with these two fields.\n"
-            "{\n"
-            "  \"text_in_image\": \"the literal question\",\n"
-            "  \"answer\": \"your factual response\"\n"
-            "}\n"
+            "You are an Agentic Vision AI. Follow this internal logic:\n"
+            "1. DESCRIBE: What text or objects do you see in the image?\n"
+            "2. ANALYZE: What is the user's core question?\n"
+            "3. DECIDE: Do you need a real-time web search (Tavily) to answer this accurately?\n"
+            "   - Use 'web_search' if the question is about news, current events, or facts you aren't 100% sure of.\n"
+            "   - Answer directly if it's a simple math problem, a known definition, or general knowledge.\n\n"
+            "Output your reasoning first, then a JSON object at the end.\n"
+            "JSON Format: {\"text_in_image\": \"<question>\", \"needs_search\": true/false, \"answer\": \"<your direct answer or search query>\"}\n"
         )
 
-        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "What is the question and answer for this image?"
+        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image."
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
-        # Prefixing the assistant response to force JSON structure
-        formatted_prompt = conv.get_prompt() + '{\n  "text_in_image": "'
+        formatted_prompt = conv.get_prompt()
 
         input_ids = tokenizer_image_token(
             formatted_prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
@@ -131,7 +132,6 @@ class EdgeAgent:
 
         pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         image_tensor = process_images([pil_img], self.image_processor, self.model.config)[0]
-        # Explicitly cast to half (float16) for GPU inference
         image_tensor = image_tensor.to(self.device, dtype=self.dtype)
 
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
@@ -141,7 +141,7 @@ class EdgeAgent:
             images=image_tensor.unsqueeze(0),
             image_sizes=[pil_img.size],
             streamer=streamer,
-            max_new_tokens=128,
+            max_new_tokens=256, # Increased for Chain-of-Thought
             do_sample=False,
             use_cache=True,
             pad_token_id=self.tokenizer.pad_token_id,
@@ -152,55 +152,49 @@ class EdgeAgent:
         thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
         thread.start()
 
-        generated_text = ""
+        full_raw_text = ""
         for new_text in streamer:
             if stop_event and stop_event.is_set():
                 break
-            generated_text += new_text
+            full_raw_text += new_text
+            # Stream the "Reasoning" part to the user live
+            if "{" not in full_raw_text:
+                yield new_text
             if STOP_TOK_A in new_text or STOP_TOK_B in new_text:
                 break
 
-        generated_text = generated_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
+        full_raw_text = full_raw_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
         
-        # Heuristic to rebuild valid JSON from the pre-filled prefix
-        full_json_str = '{\n  "text_in_image": "' + generated_text
-        if not full_json_str.strip().endswith('}'):
-            # Close quotes and braces if missing
-            if '"' in generated_text and 'answer' not in generated_text:
-                 # It likely failed to emit the second field, try to add it
-                 full_json_str += '",\n  "answer": "Scanning failed."'
-            full_json_str += '\n}'
-
+        # Extract JSON from the end of the chain-of-thought
         text_in_image = ""
+        needs_search = False
         llm_answer = ""
-
+        
         try:
-            payload = json.loads(full_json_str)
-            text_in_image = payload.get("text_in_image", "").strip()
-            llm_answer    = payload.get("answer", "").strip()
-        except json.JSONDecodeError:
-            m1 = re.search(r'"text_in_image":\s*"(.*?)"', full_json_str, re.DOTALL)
-            if m1: text_in_image = m1.group(1).strip()
-            m2 = re.search(r'"answer":\s*"(.*?)"', full_json_str, re.DOTALL)
-            if m2: llm_answer = m2.group(1).strip()
+            json_start = full_raw_text.rfind("{")
+            if json_start != -1:
+                json_str = full_raw_text[json_start:]
+                if not json_str.endswith("}"): json_str += '"}'
+                payload = json.loads(json_str)
+                text_in_image = payload.get("text_in_image", "")
+                needs_search = payload.get("needs_search", False)
+                llm_answer = payload.get("answer", "")
+        except:
+            # Fallback regex if JSON is malformed
+            m = re.search(r'"text_in_image":\s*"([^"]+)"', full_raw_text)
+            if m: text_in_image = m.group(1)
+            needs_search = "needs_search\": true" in full_raw_text.lower()
 
-        # --- Python-Side Agentic Router ---
-        # Priority: matrix > scalar math > web search > direct LLM answer
-        if detect_matrix(text_in_image) and "matrix" in AVAILABLE_TOOLS:
-            matrix_input = full_json_str + ' ' + llm_answer
-            result = AVAILABLE_TOOLS["matrix"](matrix_input)
-            yield f"\U0001f4ac Answer:\n{result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tool (matrix/numpy)"
-        elif detect_math(text_in_image) and "calculator" in AVAILABLE_TOOLS:
-            math_expr = detect_math(text_in_image)
-            result = AVAILABLE_TOOLS["calculator"](math_expr)
-            yield f"\U0001f4ac Answer: {result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tool (calculator)"
-        elif detect_web_search(text_in_image) and "web_search" in AVAILABLE_TOOLS:
-            yield f"[\U0001f310 Searching Web...] {text_in_image}"
-            result = AVAILABLE_TOOLS["web_search"](text_in_image)
-            yield f"\n\U0001f4ac Answer (Live):\n{result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tool (web_search/tavily_ai)"
+        # --- Agentic Decision Logic ---
+        if needs_search and "web_search" in AVAILABLE_TOOLS:
+            search_query = llm_answer if llm_answer else text_in_image
+            yield f"\n[\U0001f310 Decided: Search Required] -> '{search_query}'"
+            result = AVAILABLE_TOOLS["web_search"](search_query)
+            yield f"\n\U0001f4ac Final Answer:\n{result}"
+            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tavily AI"
         else:
-            yield f"\U0001f4ac Answer: {llm_answer}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME})"
+            if not llm_answer:
+                # If it didn't give an answer in JSON, use the reasoning part
+                llm_answer = full_raw_text.split("{")[0].strip()
+            yield f"\n\U0001f4ac Direct Answer: {llm_answer}"
+            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) Internal Knowledge"

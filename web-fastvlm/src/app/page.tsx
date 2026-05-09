@@ -1,16 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import ActiveVisionCamera from "@/components/ActiveVisionCamera";
 
 export default function Home() {
   const [status, setStatus] = useState<"IDLE" | "SCANNING" | "THINKING" | "ANSWERING">("IDLE");
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [backendUrl, setBackendUrl] = useState("http://localhost:8000");
+  const [backendUrl, setBackendUrl] = useState("");
   const clearTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleStableFrame = async (base64Image: string) => {
+    if (!backendUrl) return; // Guard clause
+    
     // If a new subjects triggers a scan, clear existing result and timers
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     
@@ -76,6 +78,13 @@ export default function Home() {
     }
   };
 
+  const handleStop = () => {
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    setStatus("IDLE");
+    setResult(null);
+    setError(null);
+  };
+
   return (
     <main className="main-container">
       <div className="settings-overlay">
@@ -90,11 +99,22 @@ export default function Home() {
       
       <ActiveVisionCamera 
         onStableFrame={handleStableFrame} 
-        isProcessing={status === "THINKING" || status === "ANSWERING"} 
+        onStop={handleStop}
+        isProcessing={status === "THINKING" || status === "ANSWERING" || status === "SCANNING"} 
+        shouldEnable={backendUrl.length > 5}
       />
 
-      {/* Instruction Box - Only shows if idle and no result */}
-      {status === "IDLE" && !result && !error && (
+      {/* Setup Prompt */}
+      {!backendUrl && (
+        <div className="instruction-box setup-box">
+          <div className="instruction-icon">🔗</div>
+          <h2>Connect to Backend</h2>
+          <p>Please paste your Localtunnel URL from Colab in the box at the top right to start the camera.</p>
+        </div>
+      )}
+
+      {/* Instruction Box - Only shows if connected, idle and no result */}
+      {backendUrl && status === "IDLE" && !result && !error && (
         <div className="instruction-box">
           <div className="instruction-icon">👁️</div>
           <h2>Waiting for Question</h2>
@@ -107,7 +127,16 @@ export default function Home() {
         <div className="drawer-handle"></div>
         <div className="status-banner">
           <span className={`status-dot ${status.toLowerCase()}`}></span>
-          {status === "IDLE" ? "System Ready" : status + "..."}
+          {status === "IDLE" ? "System Ready" : (
+            <>
+              {status}... 
+              <span className="step-counter">
+                ({status === "SCANNING" ? "1/4" : 
+                  status === "THINKING" ? "2/4" : 
+                  status === "ANSWERING" ? "3/4" : "4/4"})
+              </span>
+            </>
+          )}
         </div>
         
         {error ? (
