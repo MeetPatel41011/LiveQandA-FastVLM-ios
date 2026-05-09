@@ -108,35 +108,46 @@ def execute_web_search(query: str) -> str:
 
     print(f"DEBUG: Sending to Tavily -> '{query}'")
     try:
-        # We use the raw requests approach to avoid dependency issues in Colab
+        # Minimal payload for maximum compatibility across all API key tiers
         url = "https://api.tavily.com/search"
         payload = {
             "api_key": api_key,
             "query": query,
-            "search_depth": "basic",
-            "include_answer": True,
             "max_results": 1
         }
         response = requests.post(url, json=payload, timeout=15)
         
-        if response.status_code != 200:
-            return f"Tavily API Error ({response.status_code}): {response.text}"
-            
-        data = response.json()
+        if response.status_code == 200:
+            data = response.json()
+            results = data.get("results", [])
+            if results:
+                content = results[0].get('content', '')
+                return f"\U0001f310 Tavily: {content}"
         
-        # 1. Return the AI-generated answer if available (best)
-        if data.get("answer"):
-            return f"\U0001f310 Tavily AI: {data['answer']}"
+        # If Tavily fails or returns nothing, fallback to DuckDuckGo
+        return execute_fallback_search(query)
             
-        # 2. Otherwise return the top search result
-        results = data.get("results", [])
-        if results:
-            content = results[0].get('content', '')
-            return f"\U0001f310 Tavily Search: {content}"
-            
-        return f"No relevant information found for '{query}' on the web."
     except Exception as e:
-        return f"Tavily Search Error: {str(e)}"
+        print(f"Tavily Error: {e}")
+        return execute_fallback_search(query)
+
+def execute_fallback_search(query: str) -> str:
+    """Zero-config fallback using DuckDuckGo."""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        url = f"https://html.duckduckgo.com/html/?q={query}"
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            result = soup.find('a', class_='result__a')
+            snippet = soup.find('a', class_='result__snippet')
+            if result and snippet:
+                return f"\U0001f50e Web (Fallback): {snippet.get_text()}"
+    except Exception:
+        pass
+    return f"Sorry, I couldn't find a specific answer for '{query}'."
 
 
 # ─────────────────────────────────────────────
