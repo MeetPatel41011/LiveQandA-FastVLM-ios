@@ -120,19 +120,16 @@ class EdgeAgent:
 
         conv = conversation_lib.conv_templates["qwen_2"].copy()
         
-        # Phase 3: Turbo Chain-of-Thought Agentic Instructions
+        # Phase 3: Few-Shot Anchored Turbo Instructions
         rule_instruction = (
-            "You are an expert, lightning-fast Vision AI orchestrator.\n"
+            "You are a high-precision Vision AI. Read the text in the image perfectly.\n\n"
+            "Example 1: (Image has '2+2') -> Reasoning: Simple math. Output: {\"extracted_question\": \"2+2\", \"tool_needed\": \"calculator\", \"tool_query\": \"2+2\", \"answer\": \"4\"}\n"
+            "Example 2: (Image has 'Who is CEO of Nvidia?') -> Reasoning: Live fact needed. Output: {\"extracted_question\": \"Who is CEO of Nvidia?\", \"tool_needed\": \"web_search\", \"tool_query\": \"Who is current CEO of Nvidia?\", \"answer\": \"Jensen Huang\"}\n\n"
             "Rules:\n"
-            "1. OCR: Read and transcribe the text in the image WORD-FOR-WORD into 'extracted_question'.\n"
-            "2. Speed: Write a ruthlessly short internal reasoning (max 10 words).\n"
-            "3. Grounding: If you need to use a tool, the 'tool_query' MUST contain the exact specific terms from the image (e.g., 'Google Vertex AI ADK'). NEVER use generic summaries like 'google search'.\n"
-            "4. Tool Selection: Choose ONE tool if needed:\n"
-            "   - 'calculator': Use for ALL math equations.\n"
-            "   - 'matrix': Use for matrix math.\n"
-            "   - 'web_search': ONLY for live data (weather, news) or if you are unsure of a technical term.\n"
-            "   - 'none': Use internal knowledge for history, science, coding.\n"
-            "Output reasoning, then a JSON object at the end.\n"
+            "1. Transcribe the image text WORD-FOR-WORD first.\n"
+            "2. If the text is a complex technical term (like 'Google Vertex AI ADK'), YOU MUST use that exact term in your tool_query.\n"
+            "3. Reasoning must be 1 sentence only.\n"
+            "Output reasoning, then the JSON object.\n"
             "JSON Format: {\"extracted_question\": \"...\", \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
         )
 
