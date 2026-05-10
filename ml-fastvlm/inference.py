@@ -120,16 +120,16 @@ class EdgeAgent:
 
         conv = conversation_lib.conv_templates["qwen_2"].copy()
         
-        # Phase 3: Few-Shot Anchored Turbo Instructions
+        # Phase 3: Abstract Few-Shot Anchored Turbo Instructions
         rule_instruction = (
-            "You are a high-precision Vision AI. Read the text in the image perfectly.\n\n"
-            "Example 1: (Image has '2+2') -> Reasoning: Simple math. Output: {\"extracted_question\": \"2+2\", \"tool_needed\": \"calculator\", \"tool_query\": \"2+2\", \"answer\": \"4\"}\n"
-            "Example 2: (Image has 'Who is CEO of Nvidia?') -> Reasoning: Live fact needed. Output: {\"extracted_question\": \"Who is CEO of Nvidia?\", \"tool_needed\": \"web_search\", \"tool_query\": \"Who is current CEO of Nvidia?\", \"answer\": \"Jensen Huang\"}\n\n"
+            "You are a high-precision Vision AI. Read the text in the image WORD-FOR-WORD.\n\n"
+            "Example 1: (Image has 'A+B') -> Output: {\"extracted_question\": \"A+B\", \"tool_needed\": \"calculator\", \"tool_query\": \"A+B\", \"answer\": \"<calculated result>\"}\n"
+            "Example 2: (Image has 'Who won [EVENT] in 2026?') -> Output: {\"extracted_question\": \"Who won [EVENT] in 2026?\", \"tool_needed\": \"web_search\", \"tool_query\": \"Who won [EVENT] in 2026?\", \"answer\": \"<searching...>\"}\n\n"
             "Rules:\n"
-            "1. Transcribe the image text WORD-FOR-WORD first.\n"
-            "2. If the text is a complex technical term (like 'Google Vertex AI ADK'), YOU MUST use that exact term in your tool_query.\n"
-            "3. Reasoning must be 1 sentence only.\n"
-            "Output reasoning, then the JSON object.\n"
+            "1. Transcribe the image text perfectly into 'extracted_question'.\n"
+            "2. IF the question is about current events, sports, or dates in 2025 or 2026, YOU MUST use 'web_search'.\n"
+            "3. If math, use 'calculator'.\n"
+            "Output your reasoning, then the JSON object.\n"
             "JSON Format: {\"extracted_question\": \"...\", \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
         )
 
