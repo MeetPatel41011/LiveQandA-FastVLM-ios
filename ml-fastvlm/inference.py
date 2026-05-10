@@ -131,7 +131,7 @@ class EdgeAgent:
         yield f"\n[\U0001f4f7 OCR Scanner] Reading image...\n"
         
         conv = conversation_lib.conv_templates["qwen_2"].copy()
-        vlm_prompt = "Transcribe all the text, numbers, and symbols you see in this image perfectly. Do not answer questions. Just output the exact text. If there is no text, say 'NO_TEXT'."
+        vlm_prompt = "What is the exact text written in this image? Just transcribe it."
         qs = DEFAULT_IMAGE_TOKEN + '\n' + vlm_prompt
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
@@ -165,8 +165,11 @@ class EdgeAgent:
             
         extracted_text = self.tokenizer.decode(vlm_output_ids[0][input_ids.shape[1]:], skip_special_tokens=True).strip()
         
-        if "NO_TEXT" in extracted_text.upper() or not extracted_text:
-            yield f"\n\U0001f4ac Direct Answer: No readable text detected in the image. Please show the text clearly."
+        # Remove common conversational prefixes the VLM might add
+        extracted_text = extracted_text.replace("The text in the image is:", "").replace("The text says:", "").strip()
+        
+        if len(extracted_text) < 2:
+            yield f"\n\U0001f4ac Direct Answer: No readable text detected. Please hold the paper clearly in the frame."
             return
 
         # ==========================================
