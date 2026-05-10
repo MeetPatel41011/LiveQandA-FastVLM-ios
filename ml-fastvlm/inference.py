@@ -229,9 +229,6 @@ class EdgeAgent:
                 if stop_event.is_set():
                     break
                 full_raw_text += new_text
-                # Stream the "Reasoning" part to the user live
-                if "{" not in full_raw_text:
-                    yield new_text
                 if STOP_TOK_A in new_text or STOP_TOK_B in new_text:
                     break
         except GeneratorExit:
@@ -251,6 +248,7 @@ class EdgeAgent:
                     f.writelines(lines[-100:]) # Keep only last ~100 lines
                     
             reasoning_part = full_raw_text.split("{")[0].strip()
+            reasoning_part = reasoning_part.replace("```json", "").replace("```", "").strip()
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"--- LOG START ---\n{time.strftime('%Y-%m-%d %H:%M:%S')}\nEXTRACTED TEXT: {extracted_text}\nREASONING:\n{reasoning_part}\nRAW_OUTPUT:\n{full_raw_text}\n--- LOG END ---\n\n")
         except Exception as e:
