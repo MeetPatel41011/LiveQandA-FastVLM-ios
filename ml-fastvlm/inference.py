@@ -133,14 +133,15 @@ class EdgeAgent:
         # Phase 3: Abstract Few-Shot Anchored Turbo Instructions
         rule_instruction = (
             "You are a high-precision Vision AI. Read the text in the image WORD-FOR-WORD.\n\n"
-            "Example 1: (Image has 'A+B') -> Output: {\"extracted_question\": \"A+B\", \"tool_needed\": \"calculator\", \"tool_query\": \"A+B\", \"answer\": \"<calculated result>\"}\n"
-            "Example 2: (Image has 'Who won [EVENT] in 2026?') -> Output: {\"extracted_question\": \"Who won [EVENT] in 2026?\", \"tool_needed\": \"web_search\", \"tool_query\": \"Who won [EVENT] in 2026?\", \"answer\": \"<searching...>\"}\n\n"
+            "Example 1: (Image has 'A+B') -> Output: {\"extracted_question\": \"A+B\", \"confidence_score\": 0.98, \"tool_needed\": \"calculator\", \"tool_query\": \"A+B\", \"answer\": \"<result>\"}\n"
+            "Example 2: (Image has 'Who won 2026?') -> Output: {\"extracted_question\": \"Who won 2026?\", \"confidence_score\": 0.95, \"tool_needed\": \"web_search\", \"tool_query\": \"Who won 2026?\", \"answer\": \"<search>\"}\n\n"
             "Rules:\n"
             "1. Transcribe the image text perfectly into 'extracted_question'.\n"
-            "2. IF the question is about current events, sports, or dates in 2025 or 2026, YOU MUST use 'web_search'.\n"
-            "3. If math, use 'calculator'.\n"
+            "2. Confidence: Set 'confidence_score' (0.0 to 1.0) based on how clear and readable the image text is.\n"
+            "3. IF the question is about current events, sports, or dates in 2025 or 2026, YOU MUST use 'web_search'.\n"
+            "4. If math, use 'calculator'.\n"
             "Output your reasoning, then the JSON object.\n"
-            "JSON Format: {\"extracted_question\": \"...\", \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
+            "JSON Format: {\"extracted_question\": \"...\", \"confidence_score\": 0.XX, \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
         )
 
         qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image and provide the final direct answer."
@@ -205,25 +206,6 @@ class EdgeAgent:
 
         full_raw_text = full_raw_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
         perf_metrics["total_latency"] = time.perf_counter() - start_time
-
-        # --- Industry Standard Performance Report ---
-        perf_summary = (
-            f"\n\n--- PERF REPORT ---\n"
-            f"Preprocessing: {perf_metrics['pre_processing']:.3f}s\n"
-            f"Vision TTFT:   {perf_metrics['ttft_vision']:.3f}s\n"
-            f"Reasoning:     {perf_metrics['ttft_reasoning']:.3f}s\n"
-            f"Total:         {perf_metrics['total_latency']:.3f}s"
-        )
-        yield perf_summary
-
-        print("\n" + "="*40)
-        print(" \U0001f3ce\ufe0f  ML ENGINE PERFORMANCE REPORT")
-        print("="*40)
-        print(f" 1. Preprocessing (Img -> Tensors): {perf_metrics['pre_processing']:.4f}s")
-        print(f" 2. Vision TTFT (Time to First Token): {perf_metrics['ttft_vision']:.4f}s")
-        print(f" 3. Reasoning Latency (Start JSON):   {perf_metrics['ttft_reasoning']:.4f}s")
-        print(f" 4. End-to-End Latency:               {perf_metrics['total_latency']:.4f}s")
-        print("="*40 + "\n")
         
         # --- Option 1: Log the raw reasoning for analysis ---
         try:
@@ -243,6 +225,7 @@ class EdgeAgent:
 
         # Extract JSON from the end of the chain-of-thought
         extracted_question = ""
+        confidence_score = 1.0
         tool_needed = "none"
         tool_query = ""
         llm_answer = ""
@@ -254,6 +237,7 @@ class EdgeAgent:
                 if not json_str.endswith("}"): json_str += '"}'
                 payload = json.loads(json_str)
                 extracted_question = payload.get("extracted_question", "")
+                confidence_score = payload.get("confidence_score", 1.0)
                 tool_needed = payload.get("tool_needed", "none").lower()
                 tool_query = payload.get("tool_query", "")
                 llm_answer = payload.get("answer", "")
@@ -261,6 +245,8 @@ class EdgeAgent:
             # Fallback regex
             m = re.search(r'"answer":\s*"([^"]+)"', full_raw_text)
             if m: llm_answer = m.group(1)
+            m_conf = re.search(r'"confidence_score":\s*([\d\.]+)', full_raw_text)
+            if m_conf: confidence_score = float(m_conf.group(1))
             if "tool_needed\": \"calculator" in full_raw_text.lower(): tool_needed = "calculator"
             elif "tool_needed\": \"matrix" in full_raw_text.lower(): tool_needed = "matrix"
             elif "tool_needed\": \"web_search" in full_raw_text.lower(): tool_needed = "web_search"
@@ -276,6 +262,28 @@ class EdgeAgent:
             query_to_use = extracted_question
         else:
             query_to_use = tool_query if tool_query else (extracted_question if extracted_question else llm_answer)
+        
+        # --- Industry Standard Performance Report ---
+        perf_summary = (
+            f"\n\n--- PERF REPORT ---\n"
+            f"Preprocessing: {perf_metrics['pre_processing']:.3f}s\n"
+            f"Vision TTFT:   {perf_metrics['ttft_vision']:.3f}s\n"
+            f"Reasoning:     {perf_metrics['ttft_reasoning']:.3f}s\n"
+            f"Total:         {perf_metrics['total_latency']:.3f}s\n"
+            f"OCR Raw:       {extracted_question}\n"
+            f"OCR Precision: {confidence_score * 100:.1f}%"
+        )
+        yield perf_summary
+
+        print("\n" + "="*40)
+        print(" \U0001f3ce\ufe0f  ML ENGINE PERFORMANCE REPORT")
+        print("="*40)
+        print(f" 1. Preprocessing (Img -> Tensors): {perf_metrics['pre_processing']:.4f}s")
+        print(f" 2. Vision TTFT (Time to First Token): {perf_metrics['ttft_vision']:.4f}s")
+        print(f" 3. Reasoning Latency (Start JSON):   {perf_metrics['ttft_reasoning']:.4f}s")
+        print(f" 4. End-to-End Latency:               {perf_metrics['total_latency']:.4f}s")
+        print(f" 5. OCR Precision (Self-Assessed):    {confidence_score * 100:.1f}%")
+        print("="*40 + "\n")
         
         if tool_needed == "calculator" and "calculator" in AVAILABLE_TOOLS:
             yield f"\n[\U0001F522 Decided: Math Required] -> '{query_to_use}'"
