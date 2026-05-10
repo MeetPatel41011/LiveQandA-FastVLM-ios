@@ -168,6 +168,7 @@ class EdgeAgent:
             if stop_event.is_set():
                 break
             extracted_text += chunk
+            yield chunk # Stream OCR text live to the user to improve TTFT
             
         vlm_thread.join()
         
@@ -241,8 +242,16 @@ class EdgeAgent:
         
         # --- Option 1: Log the raw reasoning for analysis ---
         try:
+            log_file = "reasoning_logs.txt"
+            # Prevent infinite disk leak by capping log file size to ~1MB
+            if os.path.exists(log_file) and os.path.getsize(log_file) > 1024 * 1024:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                with open(log_file, "w", encoding="utf-8") as f:
+                    f.writelines(lines[-100:]) # Keep only last ~100 lines
+                    
             reasoning_part = full_raw_text.split("{")[0].strip()
-            with open("reasoning_logs.txt", "a", encoding="utf-8") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"--- LOG START ---\n{time.strftime('%Y-%m-%d %H:%M:%S')}\nEXTRACTED TEXT: {extracted_text}\nREASONING:\n{reasoning_part}\nRAW_OUTPUT:\n{full_raw_text}\n--- LOG END ---\n\n")
         except Exception as e:
             print(f"Failed to log reasoning: {e}")
