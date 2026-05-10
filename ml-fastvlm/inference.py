@@ -130,17 +130,15 @@ class EdgeAgent:
 
         conv = conversation_lib.conv_templates["qwen_2"].copy()
         
-        # Phase 3: Abstract Few-Shot Anchored Turbo Instructions
+        # Phase 3: Rigid Zero-Shot Turbo Instructions
         rule_instruction = (
-            "You are a high-precision Vision AI. Read the text in the image WORD-FOR-WORD.\n\n"
-            "Example 1: (Image has 'A+B') -> Output: {\"extracted_question\": \"A+B\", \"confidence_score\": 0.98, \"tool_needed\": \"calculator\", \"tool_query\": \"A+B\", \"answer\": \"<result>\"}\n"
-            "Example 2: (Image has 'Who won 2026?') -> Output: {\"extracted_question\": \"Who won 2026?\", \"confidence_score\": 0.95, \"tool_needed\": \"web_search\", \"tool_query\": \"Who won 2026?\", \"answer\": \"<search>\"}\n\n"
-            "Rules:\n"
-            "1. Transcribe the image text perfectly into 'extracted_question'.\n"
-            "2. Confidence: Set 'confidence_score' (0.0 to 1.0) based on how clear and readable the image text is.\n"
-            "3. IF the question is about current events, sports, or dates in 2025 or 2026, YOU MUST use 'web_search'.\n"
-            "4. If math, use 'calculator'.\n"
-            "Output your reasoning, then the JSON object.\n"
+            "You are a lightning-fast Vision AI. Follow these steps exactly:\n"
+            "1. OCR: Read the text in the image perfectly and put it in 'extracted_question'.\n"
+            "2. Confidence: Rate readability from 0.0 to 1.0 in 'confidence_score'.\n"
+            "3. Decision: If the question is about 2025/2026, set tool_needed to 'web_search'. If it is an equation, use 'calculator'. Otherwise, use 'none'.\n"
+            "4. Tool Query: If a tool is needed, set 'tool_query' to the exact math or search term.\n"
+            "5. Answer: Provide your best direct answer based on the text.\n"
+            "Output ONE sentence of reasoning, then the JSON block.\n"
             "JSON Format: {\"extracted_question\": \"...\", \"confidence_score\": 0.XX, \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
         )
 
@@ -255,9 +253,15 @@ class EdgeAgent:
             m_q = re.search(r'"extracted_question":\s*"([^"]+)"', full_raw_text)
             if m_q: extracted_question = m_q.group(1)
 
-        # --- Agentic Decision Logic ---
-        # Robustness Fix: For small models (1.5B), the 'tool_query' is often a lazy summary.
-        # We force 'web_search' to use the literal 'extracted_question' for maximum grounding.
+        # --- Semantic Guardrails & Decision Logic ---
+        # 1. Protection against small model hallucinations:
+        # If the model asks for a calculator but there are no numbers in the text, block it.
+        if tool_needed == "calculator":
+            numbers = re.findall(r'\d+', extracted_question)
+            if not numbers:
+                tool_needed = "none" # Reset to direct answer
+        
+        # 2. Force Grounding for Web Search
         if tool_needed == "web_search" and extracted_question:
             query_to_use = extracted_question
         else:
