@@ -282,6 +282,46 @@ body {
   transform: translateY(0);
 }
 
+/* Perf Dashboard */
+.perf-dashboard {
+  margin-top: 25px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  border-left: 3px solid var(--accent-color);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.perf-header {
+  font-size: 0.85rem;
+  font-weight: bold;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.8;
+}
+
+.perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.perf-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.perf-label {
+  font-size: 0.7rem;
+  opacity: 0.5;
+}
+
+.perf-value {
+  font-size: 0.9rem;
+  color: var(--status-stable);
+}
+
 .drawer-handle {
   width: 36px;
   height: 5px;
