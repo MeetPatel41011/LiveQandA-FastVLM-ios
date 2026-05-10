@@ -145,10 +145,13 @@ class EdgeAgent:
         image_tensor = process_images([pil_img], self.image_processor, self.model.config)[0]
         image_tensor = image_tensor.to(self.device, dtype=self.dtype)
 
+        vlm_streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+
         vlm_kwargs = dict(
             inputs=input_ids,
             images=image_tensor.unsqueeze(0),
             image_sizes=[pil_img.size],
+            streamer=vlm_streamer,
             max_new_tokens=128,
             do_sample=False,
             use_cache=True,
@@ -157,14 +160,18 @@ class EdgeAgent:
             stopping_criteria=StoppingCriteriaList([StopOnEventCriteria(stop_event)])
         )
 
-        with torch.no_grad():
-            vlm_output_ids = self.model.generate(**vlm_kwargs)
-        
-        if stop_event.is_set():
-            return
+        vlm_thread = Thread(target=self.model.generate, kwargs=vlm_kwargs)
+        vlm_thread.start()
+
+        extracted_text = ""
+        for chunk in vlm_streamer:
+            if stop_event.is_set():
+                break
+            extracted_text += chunk
             
-        extracted_text = self.tokenizer.decode(vlm_output_ids[0][input_ids.shape[1]:], skip_special_tokens=True).strip()
+        vlm_thread.join()
         
+        extracted_text = extracted_text.strip()
         # Remove common conversational prefixes the VLM might add
         extracted_text = extracted_text.replace("The text in the image is:", "").replace("The text says:", "").strip()
         
