@@ -106,7 +106,7 @@ class EdgeAgent:
         self.brain_model = AutoModelForCausalLM.from_pretrained(
             "Qwen/Qwen2.5-1.5B-Instruct", 
             torch_dtype=torch_dtype, 
-            device_map=device_map
+            device_map={"": device}
         )
 
         self.warmup()
