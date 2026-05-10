@@ -6,6 +6,7 @@ import ActiveVisionCamera from "@/components/ActiveVisionCamera";
 export default function Home() {
   const [status, setStatus] = useState<"IDLE" | "SCANNING" | "THINKING" | "ANSWERING" | "COMPLETE">("IDLE");
   const [result, setResult] = useState<string | null>(null);
+  const [perfData, setPerfData] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backendUrl, setBackendUrl] = useState("");
   const clearTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -17,6 +18,7 @@ export default function Home() {
     abortControllerRef.current = new AbortController();
     setStatus("SCANNING");
     setResult(null);
+    setPerfData(null);
     setError(null);
   };
 
@@ -59,7 +61,14 @@ export default function Home() {
               setStatus("THINKING");
             } else if (data.status === "answering") {
               setStatus("ANSWERING");
-              setResult(data.full_text);
+              // Check if chunk contains perf report
+              if (data.chunk.includes("--- PERF REPORT ---")) {
+                const parts = data.chunk.split("--- PERF REPORT ---");
+                setResult(prev => (prev || "") + parts[0]);
+                setPerfData(parts[1].trim());
+              } else {
+                setResult(data.full_text);
+              }
             } else if (data.status === "complete") {
               setStatus("COMPLETE");
               setResult(data.full_text);
@@ -95,6 +104,7 @@ export default function Home() {
     }
     setStatus("IDLE");
     setResult(null);
+    setPerfData(null);
     setError(null);
   };
 
@@ -158,9 +168,25 @@ export default function Home() {
       ) : result ? (
         <div className="result-content">
           <pre>{result}</pre>
+
+          {perfData && (
+            <div className="perf-dashboard">
+              <div className="perf-header">🏎️ ML Performance Report</div>
+              <div className="perf-grid">
+                {perfData.split('\n').map((line, i) => {
+                  const [label, val] = line.split(':');
+                  return (
+                    <div key={i} className="perf-stat">
+                      <span className="perf-label">{label}</span>
+                      <span className="perf-value">{val}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="placeholder-text">
+      ) : (        <div className="placeholder-text">
           {status === "SCANNING" ? "Position your question in frame..." : "AI is thinking..."}
         </div>
       )}

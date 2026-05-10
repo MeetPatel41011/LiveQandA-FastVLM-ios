@@ -207,6 +207,15 @@ class EdgeAgent:
         perf_metrics["total_latency"] = time.perf_counter() - start_time
 
         # --- Industry Standard Performance Report ---
+        perf_summary = (
+            f"\n\n--- PERF REPORT ---\n"
+            f"Preprocessing: {perf_metrics['pre_processing']:.3f}s\n"
+            f"Vision TTFT:   {perf_metrics['ttft_vision']:.3f}s\n"
+            f"Reasoning:     {perf_metrics['ttft_reasoning']:.3f}s\n"
+            f"Total:         {perf_metrics['total_latency']:.3f}s"
+        )
+        yield perf_summary
+
         print("\n" + "="*40)
         print(" \U0001f3ce\ufe0f  ML ENGINE PERFORMANCE REPORT")
         print("="*40)
