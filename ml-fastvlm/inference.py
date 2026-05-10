@@ -100,6 +100,15 @@ class EdgeAgent:
         global MODEL_NAME
         MODEL_NAME = "llava-fastvithd_1.5b" if "1.5b" in model_path.lower() else "llava-fastvithd_0.5b"
 
+        print(f"\U0001F9E0 [IRIS OS] Booting Brain Engine (Qwen2.5-1.5B-Instruct)...")
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        self.brain_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct")
+        self.brain_model = AutoModelForCausalLM.from_pretrained(
+            "Qwen/Qwen2.5-1.5B-Instruct", 
+            torch_dtype=torch_dtype, 
+            device_map=device_map
+        )
+
         self.warmup()
         self.warmup()
 
@@ -110,28 +119,20 @@ class EdgeAgent:
     def generate_stream(self, image: np.ndarray, prompt: str, stop_event=None) -> Generator[str, None, None]:
         from tools import AVAILABLE_TOOLS
 
+        if stop_event is None:
+            stop_event = Event()
+
         STOP_TOK_A = '<|im' + '_end|>'
         STOP_TOK_B = '</s>'
 
+        # ==========================================
+        # PHASE 1: VLM Text Extraction (FastVLM)
+        # ==========================================
+        yield f"\n[\U0001f4f7 OCR Scanner] Reading image...\n"
+        
         conv = conversation_lib.conv_templates["qwen_2"].copy()
-
-        # Phase 3: Chain-of-Thought Agentic Instructions
-        rule_instruction = (
-            "You are an expert, fast-thinking Vision AI. Your primary job is to read the image and provide the correct direct answer.\n"
-            "Rules:\n"
-            "1. Read the exact text or question in the image. If there is NO readable text (e.g. just a person's face), set answer to 'No question detected. Please show the text clearly.' and stop.\n"
-            "2. Speed & Reasoning: Keep your reasoning ruthlessly short (max 15 words).\n"
-            "3. Quality: If a term is ambiguous (e.g., 'Gemini', 'Apple'), be comprehensive and mention the major contexts (e.g., Google AI and Astrology).\n"
-            "4. Tool Selection: You have access to tools. Choose ONE tool if needed:\n"
-            "   - 'calculator': Use for ALL math equations (e.g., '12 * 45', '100 / 4').\n"
-            "   - 'matrix': Use for matrix multiplication.\n"
-            "   - 'web_search': ONLY use for live, real-time data (weather, news) or highly specific facts. NEVER search for generic phrases like 'what is the question'.\n"
-            "   - 'none': Use your own knowledge for general facts, history, science, coding.\n"
-            "Output your reasoning first, then a JSON object at the exact end.\n"
-            "JSON Format: {\"extracted_question\": \"<text read from image>\", \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"<exact equation or search query>\", \"answer\": \"<your final direct answer>\"}\n"
-        )
-
-        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image and answer the question."
+        vlm_prompt = "Transcribe all the text, numbers, and symbols you see in this image perfectly. Do not answer questions. Just output the exact text. If there is no text, say 'NO_TEXT'."
+        qs = DEFAULT_IMAGE_TOKEN + '\n' + vlm_prompt
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
         formatted_prompt = conv.get_prompt()
@@ -144,26 +145,71 @@ class EdgeAgent:
         image_tensor = process_images([pil_img], self.image_processor, self.model.config)[0]
         image_tensor = image_tensor.to(self.device, dtype=self.dtype)
 
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-
-        if stop_event is None:
-            stop_event = Event()
-
-        generation_kwargs = dict(
+        vlm_kwargs = dict(
             inputs=input_ids,
             images=image_tensor.unsqueeze(0),
             image_sizes=[pil_img.size],
-            streamer=streamer,
-            max_new_tokens=256, # Increased for Chain-of-Thought
+            max_new_tokens=128,
             do_sample=False,
             use_cache=True,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
-            repetition_penalty=1.1,
             stopping_criteria=StoppingCriteriaList([StopOnEventCriteria(stop_event)])
         )
 
-        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+        with torch.no_grad():
+            vlm_output_ids = self.model.generate(**vlm_kwargs)
+        
+        if stop_event.is_set():
+            return
+            
+        extracted_text = self.tokenizer.decode(vlm_output_ids[0][input_ids.shape[1]:], skip_special_tokens=True).strip()
+        
+        if "NO_TEXT" in extracted_text.upper() or not extracted_text:
+            yield f"\n\U0001f4ac Direct Answer: No readable text detected in the image. Please show the text clearly."
+            return
+
+        # ==========================================
+        # PHASE 2: Brain Reasoning (Qwen2.5-1.5B)
+        # ==========================================
+        yield f"[\U0001F9E0 Brain] Analyzing text: '{extracted_text}'...\n"
+        
+        rule_instruction = (
+            "You are an expert, fast-thinking AI Orchestrator.\n"
+            f"Extracted Text from User's Image: '{extracted_text}'\n"
+            "Rules:\n"
+            "1. Answer the question presented in the extracted text.\n"
+            "2. Speed & Reasoning: Keep your reasoning ruthlessly short (max 15 words).\n"
+            "3. Quality: If a term is ambiguous (e.g., 'Gemini', 'Apple'), be comprehensive and mention the major contexts.\n"
+            "4. Tool Selection: You have access to tools. Choose ONE tool if needed:\n"
+            "   - 'calculator': Use for ALL math equations (e.g., '12 * 45', '100 / 4').\n"
+            "   - 'matrix': Use for matrix multiplication.\n"
+            "   - 'web_search': ONLY use for live, real-time data (weather, news) or highly specific facts. NEVER search for generic phrases.\n"
+            "   - 'none': Use your own knowledge for general facts, history, science, coding.\n"
+            "Output your reasoning first, then a JSON object at the exact end.\n"
+            "JSON Format: {\"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"<exact equation or search query>\", \"answer\": \"<your final direct answer>\"}\n"
+        )
+
+        messages = [
+            {"role": "system", "content": "You are a helpful and fast analytical AI orchestrator."},
+            {"role": "user", "content": rule_instruction}
+        ]
+        text_prompt = self.brain_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        brain_inputs = self.brain_tokenizer([text_prompt], return_tensors="pt").to(self.device)
+        
+        streamer = TextIteratorStreamer(self.brain_tokenizer, skip_prompt=True, skip_special_tokens=True)
+        
+        generation_kwargs = dict(
+            **brain_inputs,
+            streamer=streamer,
+            max_new_tokens=256,
+            do_sample=False,
+            pad_token_id=self.brain_tokenizer.pad_token_id,
+            eos_token_id=self.brain_tokenizer.eos_token_id,
+            stopping_criteria=StoppingCriteriaList([StopOnEventCriteria(stop_event)])
+        )
+
+        thread = Thread(target=self.brain_model.generate, kwargs=generation_kwargs)
         thread.start()
 
         full_raw_text = ""
@@ -187,12 +233,11 @@ class EdgeAgent:
         try:
             reasoning_part = full_raw_text.split("{")[0].strip()
             with open("reasoning_logs.txt", "a", encoding="utf-8") as f:
-                f.write(f"--- LOG START ---\n{time.strftime('%Y-%m-%d %H:%M:%S')}\nREASONING:\n{reasoning_part}\nRAW_OUTPUT:\n{full_raw_text}\n--- LOG END ---\n\n")
+                f.write(f"--- LOG START ---\n{time.strftime('%Y-%m-%d %H:%M:%S')}\nEXTRACTED TEXT: {extracted_text}\nREASONING:\n{reasoning_part}\nRAW_OUTPUT:\n{full_raw_text}\n--- LOG END ---\n\n")
         except Exception as e:
             print(f"Failed to log reasoning: {e}")
 
         # Extract JSON from the end of the chain-of-thought
-        extracted_question = ""
         tool_needed = "none"
         tool_query = ""
         llm_answer = ""
@@ -203,7 +248,6 @@ class EdgeAgent:
                 json_str = full_raw_text[json_start:]
                 if not json_str.endswith("}"): json_str += '"}'
                 payload = json.loads(json_str)
-                extracted_question = payload.get("extracted_question", "")
                 tool_needed = payload.get("tool_needed", "none").lower()
                 tool_query = payload.get("tool_query", "")
                 llm_answer = payload.get("answer", "")
@@ -221,35 +265,35 @@ class EdgeAgent:
             if m_query: tool_query = m_query.group(1)
 
         # --- Agentic Decision Logic ---
-        query_to_use = tool_query if tool_query else (extracted_question if extracted_question else llm_answer)
+        query_to_use = tool_query if tool_query else (extracted_text if extracted_text else llm_answer)
         
         if tool_needed == "calculator" and "calculator" in AVAILABLE_TOOLS:
             yield f"\n[\U0001F522 Decided: Math Required] -> '{query_to_use}'"
             result = AVAILABLE_TOOLS["calculator"](query_to_use)
             yield f"\n\U0001f4ac Final Answer:\n{result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Python Calculator Tool"
+            yield f"\n\U0001f4cc Source: Brain Engine ({MODEL_NAME}) + Python Calculator Tool"
             
         elif tool_needed == "matrix" and "matrix" in AVAILABLE_TOOLS:
             yield f"\n[\U0001F4BE Decided: Matrix Math Required] -> '{query_to_use}'"
             result = AVAILABLE_TOOLS["matrix"](query_to_use)
             yield f"\n\U0001f4ac Final Answer:\n{result}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + NumPy Matrix Tool"
+            yield f"\n\U0001f4cc Source: Brain Engine ({MODEL_NAME}) + NumPy Matrix Tool"
             
         elif tool_needed == "web_search" and "web_search" in AVAILABLE_TOOLS:
             bad_queries = ["what is the question", "what is the question?", "what is the question and answer for this image?"]
             if not query_to_use or query_to_use.lower().strip() in bad_queries:
                 # If it's a bad query, just fallback to direct answer
                 yield f"\n\U0001f4ac Direct Answer: {llm_answer if llm_answer else full_raw_text.split('{')[0].strip()}"
-                yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) Internal Knowledge"
+                yield f"\n\U0001f4cc Source: Brain Engine ({MODEL_NAME}) Internal Knowledge"
             else:
                 yield f"\n[\U0001f310 Decided: Search Required] -> '{query_to_use}'"
                 result = AVAILABLE_TOOLS["web_search"](query_to_use)
                 yield f"\n\U0001f4ac Final Answer:\n{result}"
-                yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) + Tavily AI"
+                yield f"\n\U0001f4cc Source: Brain Engine ({MODEL_NAME}) + Tavily AI"
                 
         else: # "none" or tool not available
             if not llm_answer:
                 # If it didn't give an answer in JSON, use the reasoning part
                 llm_answer = full_raw_text.split("{")[0].strip()
             yield f"\n\U0001f4ac Direct Answer: {llm_answer}"
-            yield f"\n\U0001f4cc Source: LLM ({MODEL_NAME}) Internal Knowledge"
+            yield f"\n\U0001f4cc Source: Brain Engine ({MODEL_NAME}) Internal Knowledge"
