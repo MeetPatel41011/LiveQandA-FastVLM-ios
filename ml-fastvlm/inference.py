@@ -81,10 +81,12 @@ class EdgeAgent:
         self.device = device
         self.dtype = torch_dtype
         
+        # Performance Hack: Use Scaled Dot Product Attention (SDPA) for lightning prefill
         self.tokenizer, self.model, self.image_processor, self.context_len = load_pretrained_model(
             model_path=model_path, model_base=None,
             model_name=get_model_name_from_path(model_path),
-            device=device, torch_dtype=torch_dtype
+            device=device, torch_dtype=torch_dtype,
+            attn_implementation="sdpa" # Force high-speed attention kernels
         )
         
         # Ensure vision tower is on the correct device
@@ -128,21 +130,22 @@ class EdgeAgent:
 
         yield f"\n[\u26a1 Turbo Mode] Vision Engine Analyzing...\n"
 
+        # Image Pre-Scaling: Shrink to standard VLM resolution to slash encoding latency
+        pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        if max(pil_img.size) > 768:
+            pil_img.thumbnail((768, 768), Image.Resampling.LANCZOS)
+
         conv = conversation_lib.conv_templates["qwen_2"].copy()
         
-        # Phase 3: Rigid Zero-Shot Turbo Instructions
+        # Phase 3: Surcharged Terse Prompt (Minimize Prefill Tokens)
         rule_instruction = (
-            "You are a lightning-fast Vision AI. Follow these steps exactly:\n"
-            "1. OCR: Read the text in the image perfectly and put it in 'extracted_question'.\n"
-            "2. Confidence: Rate readability from 0.0 to 1.0 in 'confidence_score'.\n"
-            "3. Decision: If the question is about 2025/2026, set tool_needed to 'web_search'. If it is an equation, use 'calculator'. Otherwise, use 'none'.\n"
-            "4. Tool Query: If a tool is needed, set 'tool_query' to the exact math or search term.\n"
-            "5. Answer: Provide your best direct answer based on the text.\n"
-            "Output ONE sentence of reasoning, then the JSON block.\n"
-            "JSON Format: {\"extracted_question\": \"...\", \"confidence_score\": 0.XX, \"tool_needed\": \"none\"|\"web_search\"|\"calculator\"|\"matrix\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
+            "Task: Transcribe image text then decide tool.\n"
+            "Decision Logic: 2025/2026?->'web_search'. Math?->'calculator'. Else->'none'.\n"
+            "Output Format: Short reasoning then JSON.\n"
+            "JSON: {\"extracted_question\": \"...\", \"confidence_score\": 0.X, \"tool_needed\": \"...\", \"tool_query\": \"...\", \"answer\": \"...\"}\n"
         )
 
-        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze this image and provide the final direct answer."
+        qs = DEFAULT_IMAGE_TOKEN + '\n' + rule_instruction + "Analyze image."
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
         formatted_prompt = conv.get_prompt()
@@ -151,7 +154,6 @@ class EdgeAgent:
             formatted_prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
         ).unsqueeze(0).to(self.device)
 
-        pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         image_tensor = process_images([pil_img], self.image_processor, self.model.config)[0]
         image_tensor = image_tensor.to(self.device, dtype=self.dtype)
 
