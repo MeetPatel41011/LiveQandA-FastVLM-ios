@@ -1,0 +1,115 @@
+================================================================================
+FASTVLM PROJECT RETROSPECTIVE: FROM BASE TO CORE (LATE 2026)
+================================================================================
+
+This document serves as a comprehensive record of the engineering journey to 
+harden, optimize, and scale the FastVLM Agentic Vision system.
+
+--------------------------------------------------------------------------------
+1. THE BASE LAYER: SECURITY & RESOURCE INTEGRITY
+--------------------------------------------------------------------------------
+
+CHANGE: Removed `eval()` from the Calculator and Complex-Number tools.
+WHY: Use of `eval()` on raw LLM/User input is a critical Remote Code Execution 
+     (RCE) vulnerability.
+FIX: Implemented a strict Abstract Syntax Tree (AST) parser using `ast.parse` 
+     and `operator` to allow only basic arithmetic.
+
+CHANGE: Implemented `asyncio.CancelledError` catching and `StoppingCriteria`.
+WHY: Background threads running the model generation were "leaking". If a user 
+     closed the browser, the GPU kept working until the max_tokens limit.
+FIX: Created a unified `StopOnEventCriteria` that propagates the cancellation 
+     signal from the FastAPI request down to the model's CUDA kernels.
+
+CHANGE: Added React `isMounted` ref and `AbortController` to the frontend.
+WHY: Media streams were staying "on" (green camera light stuck) after component 
+     unmount. Network requests were "bleeding" into subsequent UI states.
+FIX: Deterministic cleanup of all media tracks and hard-cancellation of fetch 
+     requests on user "Stop".
+
+--------------------------------------------------------------------------------
+2. THE UI LAYER: RELIABLE USER EXPERIENCE
+--------------------------------------------------------------------------------
+
+CHANGE: Implemented a 4-step State Machine (SCANNING -> THINKING -> ANSWERING -> COMPLETE).
+WHY: The system was crashing or "jumping" states because it tried to process 
+     too much at once.
+FIX: Added 1.5s positioning delay to the camera capture to ensure the user 
+     actually has the paper in the frame before the pixels are encoded.
+
+--------------------------------------------------------------------------------
+3. THE CORE LAYER: EVOLUTION OF THE REASONING ENGINE
+--------------------------------------------------------------------------------
+
+CHANGE: Transitioned from simple "Image-to-Text" to "Agentic Orchestration".
+WHY: LLMs are notoriously bad at math. We needed to route complex logic to 
+     deterministic Python tools (NumPy, AST, Tavily).
+FIX: Engineered a rigid JSON schema in the system prompt where the model 
+     declares a `tool_needed`.
+
+CHANGE: The Hallucination War (Few-Shot to Zero-Shot Grounding).
+WHY: The 1.5B model suffered from "Prompt Poisoning". It began copy-pasting the 
+     "A+B" example from my prompt instead of reading the image.
+FIX: Removed all specific examples (Jensen Huang, etc.). Moved to a **Zero-Shot 
+     Rigid Prompt** and implemented a **Semantic Guardrail** in Python that 
+     blocks the calculator if no numbers/math words are detected.
+
+CHANGE: "Iron Grounding" for Web Searches.
+WHY: The small model "lazy-summarized" specific questions (e.g., "2026 IPL") 
+     into generic ones (e.g., "google search").
+FIX: Hard-coded the Python backend to ignore the model's proposed search query 
+     and instead **force** the use of the literal `OCR Raw` text for searches.
+
+--------------------------------------------------------------------------------
+4. THE PERFORMANCE LAYER: ENGINEERING SUB-1000ms TTFT
+--------------------------------------------------------------------------------
+
+CHANGE: Forced SDPA (Scaled Dot Product Attention) kernels.
+WHY: Standard attention in PyTorch/Transformers is slow. SDPA uses high-speed 
+     C++/CUDA kernels.
+RESULT: Slashed prefill latency by ~30%.
+
+CHANGE: Implementation of "Telegraphic Prompting".
+WHY: Long, friendly system prompts add "token bloat" to the prefill stage.
+FIX: Rewrote instructions in a terse, technical format. Fewer tokens = faster 
+     first character on screen.
+
+CHANGE: Aggressive Image Pre-Scaling (768px limit).
+WHY: Encoding high-resolution frames (1080p+) is computationally expensive 
+     for a Vision Transformer on a T4 GPU.
+FIX: Implemented Lanczos downscaling before the vision tower.
+
+--------------------------------------------------------------------------------
+5. ALTERNATIVE APPROACHES CONSIDERED (AND WHY REJECTED)
+--------------------------------------------------------------------------------
+
+APPROACH: Using Agent Frameworks (Google ADK, LangChain).
+WHY NOT: Frameworks are heavy and designed for "Smart" models (GPT-4). Putting a 
+         1.5B model in a heavy framework causes constant parsing crashes. A 
+         lean, custom Python orchestrator is much faster and more transparent.
+
+APPROACH: Using Cloud APIs (Gemini 1.5 Flash).
+WHY NOT: The user explicitly demanded 100% privacy and local execution. While 
+         cloud APIs are faster, they compromise the "Local-First" mandate.
+
+APPROACH: Dual-Model Pipeline (FastVLM OCR -> Qwen Brain).
+WHY NOT: Initially implemented this to increase intelligence, but it doubled the 
+         latency (5s -> 10s). Reverted to Single-Pass Turbo mode to achieve 
+         the <1000ms TTFT target while maintaining grounding via Python code.
+
+--------------------------------------------------------------------------------
+6. INTERVIEW TALKING POINTS (FOR GOOGLE AI/ML ROLES)
+--------------------------------------------------------------------------------
+
+- **Latency Slicing:** Explain how you broke down TTFT into Preprocessing, 
+  Vision, and Reasoning.
+- **Self-Reflexive Metrics:** Discuss the OCR Precision score (Confidence) 
+  where the model assesses its own uncertainty.
+- **Aleatoric Uncertainty:** Use this term when describing why you added the 
+  OCR confidence score to the UI.
+- **Context Grounding:** Explain the Python-level guardrails you built to 
+  prevent the LLM from hallucinating queries.
+
+================================================================================
+LOG CONCLUDED - ALL SYSTEMS NOMINAL
+================================================================================
