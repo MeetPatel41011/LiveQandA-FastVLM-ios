@@ -229,7 +229,12 @@ class EdgeAgent:
             if m_q: extracted_question = m_q.group(1)
 
         # --- Agentic Decision Logic ---
-        query_to_use = tool_query if tool_query else (extracted_question if extracted_question else llm_answer)
+        # Robustness Fix: For small models (1.5B), the 'tool_query' is often a lazy summary.
+        # We force 'web_search' to use the literal 'extracted_question' for maximum grounding.
+        if tool_needed == "web_search" and extracted_question:
+            query_to_use = extracted_question
+        else:
+            query_to_use = tool_query if tool_query else (extracted_question if extracted_question else llm_answer)
         
         if tool_needed == "calculator" and "calculator" in AVAILABLE_TOOLS:
             yield f"\n[\U0001F522 Decided: Math Required] -> '{query_to_use}'"
