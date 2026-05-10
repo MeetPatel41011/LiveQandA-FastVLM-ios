@@ -255,11 +255,14 @@ class EdgeAgent:
 
         # --- Semantic Guardrails & Decision Logic ---
         # 1. Protection against small model hallucinations:
-        # If the model asks for a calculator but there are no numbers in the text, block it.
+        # If the model asks for a calculator, verify it's actually math (numbers or math words).
         if tool_needed == "calculator":
-            numbers = re.findall(r'\d+', extracted_question)
-            if not numbers:
-                tool_needed = "none" # Reset to direct answer
+            math_keywords = ['root', 'sqrt', 'plus', 'minus', 'times', 'divide', 'square', 'power', 'sum', 'add']
+            has_numbers = bool(re.search(r'\d+', extracted_question))
+            has_keywords = any(kw in extracted_question.lower() for kw in math_keywords)
+            
+            if not (has_numbers or has_keywords):
+                tool_needed = "none" # Reset to direct answer if no math signals found
         
         # 2. Force Grounding for Web Search
         if tool_needed == "web_search" and extracted_question:
