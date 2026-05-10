@@ -109,6 +109,16 @@ class EdgeAgent:
 
     def generate_stream(self, image: np.ndarray, prompt: str, stop_event=None) -> Generator[str, None, None]:
         from tools import AVAILABLE_TOOLS
+        import time
+
+        # Start the Master Clock
+        start_time = time.perf_counter()
+        perf_metrics = {
+            "pre_processing": 0.0,
+            "ttft_vision": 0.0,
+            "ttft_reasoning": 0.0,
+            "total_latency": 0.0
+        }
 
         if stop_event is None:
             stop_event = Event()
@@ -146,6 +156,8 @@ class EdgeAgent:
         image_tensor = process_images([pil_img], self.image_processor, self.model.config)[0]
         image_tensor = image_tensor.to(self.device, dtype=self.dtype)
 
+        perf_metrics["pre_processing"] = time.perf_counter() - start_time
+
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
         generation_kwargs = dict(
@@ -170,10 +182,19 @@ class EdgeAgent:
             for new_text in streamer:
                 if stop_event.is_set():
                     break
+                
+                # Measure TTFT (First Token from Streamer)
+                if not full_raw_text:
+                    perf_metrics["ttft_vision"] = time.perf_counter() - start_time
+                
                 full_raw_text += new_text
+                
+                # Measure Reasoning Latency (Time until JSON brace appears)
+                if "{" in new_text and perf_metrics["ttft_reasoning"] == 0:
+                    perf_metrics["ttft_reasoning"] = time.perf_counter() - start_time
+
                 # Stream everything BEFORE the JSON block to show "thinking" live
                 if "{" not in full_raw_text:
-                    # Clean up markdown leaks if they happen
                     cleaned_chunk = new_text.replace("```json", "").replace("```", "")
                     yield cleaned_chunk
                 if STOP_TOK_A in new_text or STOP_TOK_B in new_text:
@@ -183,6 +204,17 @@ class EdgeAgent:
             raise
 
         full_raw_text = full_raw_text.replace(STOP_TOK_A, '').replace(STOP_TOK_B, '').strip()
+        perf_metrics["total_latency"] = time.perf_counter() - start_time
+
+        # --- Industry Standard Performance Report ---
+        print("\n" + "="*40)
+        print(" \U0001f3ce\ufe0f  ML ENGINE PERFORMANCE REPORT")
+        print("="*40)
+        print(f" 1. Preprocessing (Img -> Tensors): {perf_metrics['pre_processing']:.4f}s")
+        print(f" 2. Vision TTFT (Time to First Token): {perf_metrics['ttft_vision']:.4f}s")
+        print(f" 3. Reasoning Latency (Start JSON):   {perf_metrics['ttft_reasoning']:.4f}s")
+        print(f" 4. End-to-End Latency:               {perf_metrics['total_latency']:.4f}s")
+        print("="*40 + "\n")
         
         # --- Option 1: Log the raw reasoning for analysis ---
         try:
