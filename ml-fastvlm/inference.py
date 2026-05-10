@@ -237,7 +237,7 @@ class EdgeAgent:
                 if not json_str.endswith("}"): json_str += '"}'
                 payload = json.loads(json_str)
                 extracted_question = payload.get("extracted_question", "")
-                confidence_score = payload.get("confidence_score", 1.0)
+                confidence_score = float(payload.get("confidence_score", 1.0))
                 tool_needed = payload.get("tool_needed", "none").lower()
                 tool_query = payload.get("tool_query", "")
                 llm_answer = payload.get("answer", "")
