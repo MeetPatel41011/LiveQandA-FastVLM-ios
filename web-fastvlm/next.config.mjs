@@ -1,4 +1,3 @@
-import type { NextConfig } from "next";
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import CopyWebpackPlugin from 'copy-webpack-plugin';
@@ -6,7 +5,8 @@ import CopyWebpackPlugin from 'copy-webpack-plugin';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   webpack: (config, { isServer, webpack }) => {
     // 1. Enable async WebAssembly
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
