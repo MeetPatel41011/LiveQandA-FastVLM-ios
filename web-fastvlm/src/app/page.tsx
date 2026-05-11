@@ -8,6 +8,7 @@ export default function Home() {
   const [result, setResult] = useState<string | null>(null);
   const [perfData, setPerfData] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{file: string, progress: number, status: string} | null>(null);
   const clearTimerRef = useRef<NodeJS.Timeout | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
@@ -21,7 +22,14 @@ export default function Home() {
       workerRef.current.onmessage = async (event) => {
         const { type, success, result: outputResult, error: workerError, payload } = event.data;
 
-        if (type === 'modelLoaded') {
+        if (type === 'progress') {
+          if (payload.status === 'progress') {
+            setDownloadProgress({ file: payload.file, progress: payload.progress, status: payload.status });
+          } else if (payload.status === 'ready' || payload.status === 'done') {
+            setDownloadProgress(null);
+          }
+        }
+        else if (type === 'modelLoaded') {
           if (success) {
             setIsModelReady(true);
             setStatus("IDLE");
@@ -115,8 +123,21 @@ export default function Home() {
   return (
     <main className="main-container">
       {status === "LOADING" && (
-        <div className="settings-overlay" style={{ background: 'rgba(0,0,0,0.8)', color: 'white', padding: '10px' }}>
-          Downloading Model (300MB) to WebGPU Cache...
+        <div className="settings-overlay" style={{ background: 'rgba(0,0,0,0.8)', color: 'white', padding: '15px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ fontWeight: 'bold' }}>Downloading WebGPU Model...</div>
+          {downloadProgress && (
+            <div style={{ fontSize: '0.85rem' }}>
+              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '250px' }}>
+                {downloadProgress.file}
+              </div>
+              <div style={{ width: '100%', background: '#333', height: '8px', borderRadius: '4px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${downloadProgress.progress}%`, background: 'var(--accent-color)', height: '100%', transition: 'width 0.1s' }}></div>
+              </div>
+              <div style={{ textAlign: 'right', marginTop: '4px', fontSize: '0.75rem', opacity: 0.8 }}>
+                {downloadProgress.progress.toFixed(1)}%
+              </div>
+            </div>
+          )}
         </div>
       )}
       

@@ -26,6 +26,9 @@ self.onmessage = async (event) => {
         {
           device: 'webgpu',
           dtype: 'fp16', 
+          progress_callback: (progressInfo) => {
+            self.postMessage({ type: 'progress', payload: progressInfo });
+          }
         }
       );
       self.postMessage({ type: 'modelLoaded', success: true });
