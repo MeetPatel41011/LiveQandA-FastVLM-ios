@@ -1,21 +1,92 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import ActiveVisionCamera from "@/components/ActiveVisionCamera";
 
 export default function Home() {
-  const [status, setStatus] = useState<"IDLE" | "SCANNING" | "THINKING" | "ANSWERING" | "COMPLETE">("IDLE");
+  const [status, setStatus] = useState<"IDLE" | "LOADING" | "SCANNING" | "THINKING" | "ANSWERING" | "COMPLETE">("IDLE");
   const [result, setResult] = useState<string | null>(null);
   const [perfData, setPerfData] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [backendUrl, setBackendUrl] = useState("");
   const clearTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const [isModelReady, setIsModelReady] = useState(false);
+
+  // Initialize WebGPU Worker on Mount
+  useEffect(() => {
+    if (typeof Worker !== 'undefined') {
+      setStatus("LOADING");
+      workerRef.current = new Worker('/worker/inference.worker.js');
+      
+      workerRef.current.onmessage = async (event) => {
+        const { type, success, result: outputResult, error: workerError, payload } = event.data;
+
+        if (type === 'modelLoaded') {
+          if (success) {
+            setIsModelReady(true);
+            setStatus("IDLE");
+            console.log('Main Thread: WebGPU Model loaded successfully.');
+          } else {
+            setError(`Failed to load model: ${workerError}`);
+            setStatus("IDLE");
+          }
+        } 
+        else if (type === 'inferenceResult') {
+          if (success) {
+            setStatus("COMPLETE");
+            setResult(outputResult);
+            // Auto-clear after 60s
+            clearTimerRef.current = setTimeout(() => {
+              setResult(null);
+              setStatus("IDLE");
+            }, 60000);
+          } else {
+            setError(`Inference failed: ${workerError}`);
+            setStatus("IDLE");
+          }
+        } 
+        else if (type === 'toolCall' && payload?.type === 'web_search') {
+          console.log(`Main Thread: Received toolCall from worker for query: "${payload.query}"`);
+          setStatus("ANSWERING");
+          setResult(`Searching live data for: "${payload.query}"...`);
+          
+          const startPerf = performance.now();
+          try {
+            // Call secure serverless proxy
+            const response = await fetch(`/api/tavily?query=${encodeURIComponent(payload.query)}`);
+            const data = await response.json();
+            
+            if (data.success) {
+              workerRef.current?.postMessage({ type: 'toolResult', payload: { type: 'web_search', results: data.results } });
+            } else {
+              workerRef.current?.postMessage({ type: 'toolResult', payload: { type: 'web_search', error: data.error } });
+            }
+            
+            const toolLatency = ((performance.now() - startPerf) / 1000).toFixed(3);
+            setPerfData(`Web Search Latency: ${toolLatency}s`);
+            
+          } catch (apiError: any) {
+            workerRef.current?.postMessage({ type: 'toolResult', payload: { type: 'web_search', error: apiError.message } });
+          }
+        }
+      };
+
+      // Instruct worker to download and cache the ONNX model into WebGPU
+      workerRef.current.postMessage({ 
+        type: 'loadModel', 
+        payload: { task: 'image-text-to-text', modelName: 'Xenova/llava-onevision' } 
+      });
+
+      return () => {
+        if (workerRef.current) workerRef.current.terminate();
+      };
+    } else {
+      setError('Web Workers are not supported in this browser.');
+    }
+  }, []);
 
   const handleCaptureStart = () => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
     setStatus("SCANNING");
     setResult(null);
     setPerfData(null);
@@ -23,85 +94,18 @@ export default function Home() {
   };
 
   const handleStableFrame = async (base64Image: string) => {
-    if (!backendUrl) return; // Guard clause
-
-    try {
-      const response = await fetch(`${backendUrl}/api/analyze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "bypass-tunnel-reminder": "true",
-        },
-        body: JSON.stringify({ image_base64: base64Image }),
-        signal: abortControllerRef.current?.signal,
-      });
-
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.status === "thinking") {
-              setStatus("THINKING");
-            } else if (data.status === "answering") {
-              setStatus("ANSWERING");
-              // Check if chunk contains perf report
-              if (data.chunk.includes("--- PERF REPORT ---")) {
-                const parts = data.chunk.split("--- PERF REPORT ---");
-                setResult(prev => (prev || "") + parts[0]);
-                setPerfData(parts[1].trim());
-              } else {
-                setResult(data.full_text);
-              }
-            } else if (data.status === "complete") {
-              setStatus("COMPLETE");
-              setResult(data.full_text);
-              // Start the 60-second persistence timer
-              clearTimerRef.current = setTimeout(() => {
-                setResult(null);
-                setStatus("IDLE");
-              }, 60000);
-            } else if (data.status === "error") {
-              setError(data.message);
-            }
-          } catch (e) {
-            console.error("Parse error:", e);
-          }
-        }
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        console.log("Fetch aborted");
-        return;
-      }
-      console.error(err);
-      setError(err instanceof Error ? err.message : "An error occurred");
-      setStatus("IDLE");
-    }
+    if (!isModelReady || !workerRef.current) return;
+    setStatus("THINKING");
+    
+    // Send image to WebGPU Worker
+    workerRef.current.postMessage({ 
+      type: 'runInference', 
+      payload: { imageBlob: base64Image } 
+    });
   };
 
   const handleStop = () => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
     setStatus("IDLE");
     setResult(null);
     setPerfData(null);
@@ -110,44 +114,40 @@ export default function Home() {
 
   return (
     <main className="main-container">
-      <div className="settings-overlay">
-        <input 
-          type="text" 
-          value={backendUrl} 
-          onChange={(e) => setBackendUrl(e.target.value)}
-          placeholder="Backend URL (e.g. https://...loca.lt)"
-          className="backend-input"
-        />
-      </div>
+      {status === "LOADING" && (
+        <div className="settings-overlay" style={{ background: 'rgba(0,0,0,0.8)', color: 'white', padding: '10px' }}>
+          Downloading Model (300MB) to WebGPU Cache...
+        </div>
+      )}
       
       <ActiveVisionCamera
       onCaptureStart={handleCaptureStart}
       onStableFrame={handleStableFrame} 
       onStop={handleStop}
-      isProcessing={status === "THINKING" || status === "ANSWERING" || status === "SCANNING" || status === "COMPLETE"} 
-      shouldEnable={backendUrl.length > 5}
+      isProcessing={status === "THINKING" || status === "ANSWERING" || status === "SCANNING" || status === "COMPLETE" || status === "LOADING"} 
+      shouldEnable={isModelReady}
       />
 
       {/* Setup Prompt */}
-      {!backendUrl && (
+      {!isModelReady && status !== "LOADING" && (
       <div className="instruction-box setup-box">
-        <div className="instruction-icon">🔗</div>
-        <h2>Connect to Backend</h2>
-        <p>Please paste your Localtunnel URL from Colab in the box at the top right to start the camera.</p>
+        <div className="instruction-icon">⚙️</div>
+        <h2>Initializing WebGPU</h2>
+        <p>Your browser is allocating local GPU memory for the Vision Model.</p>
       </div>
       )}
 
       {/* Instruction Box - Only shows if connected, idle and no result */}
-      {backendUrl && status === "IDLE" && !result && !error && (
+      {isModelReady && status === "IDLE" && !result && !error && (
       <div className="instruction-box">
         <div className="instruction-icon">👁️</div>
-        <h2>Waiting for Question</h2>
-        <p>Hold a written or verbal question steady in front of the camera to get an answer.</p>
+        <h2>Web-Native AI Ready</h2>
+        <p>Hold a question steady. Inference runs 100% locally on your GPU.</p>
       </div>
       )}
 
       {/* Result Bottom Sheet */}
-      <div className={`result-drawer ${(result || error || status !== "IDLE") ? "open" : ""}`}>
+      <div className={`result-drawer ${(result || error || status !== "IDLE" && status !== "LOADING") ? "open" : ""}`}>
       <div className="drawer-handle"></div>
       <div className="status-banner">
         <span className={`status-dot ${status.toLowerCase()}`}></span>
