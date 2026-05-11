@@ -9,7 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@tavily/core": "^0.7.3",
+    "copy-webpack-plugin": "^14.0.0",
     "next": "16.2.6",
+    "onnxruntime-web": "^1.26.0",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
