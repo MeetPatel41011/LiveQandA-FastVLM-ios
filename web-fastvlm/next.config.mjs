@@ -35,20 +35,8 @@ const nextConfig = {
         new CopyWebpackPlugin({
           patterns: [
             {
-              from: resolve(__dirname, 'node_modules/onnxruntime-web/dist/*.wasm'),
-              to: resolve(__dirname, '.next/static/wasm/[name][ext]'),
-            },
-            {
-              from: resolve(__dirname, 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm'),
-              to: resolve(__dirname, '.next/static/wasm/ort-wasm-simd-threaded.jsep.wasm'),
-            },
-            {
-              from: resolve(__dirname, 'node_modules/onnxruntime-web/dist/ort-wasm-simd.jsep.wasm'),
-              to: resolve(__dirname, '.next/static/wasm/ort-wasm-simd.jsep.wasm'),
-            },
-            {
-              from: resolve(__dirname, 'node_modules/onnxruntime-web/dist/ort-wasm.jsep.wasm'),
-              to: resolve(__dirname, '.next/static/wasm/ort-wasm.jsep.wasm'),
+              from: 'node_modules/onnxruntime-web/dist/*.wasm',
+              to: 'static/wasm/[name][ext]',
             },
           ],
         })
